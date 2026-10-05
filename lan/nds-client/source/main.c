@@ -14,7 +14,7 @@
 #include "settings_ui.h"
 
 #define MAX_SAVES 8
-#define APP_VERSION "0.4.1"
+#define APP_VERSION "0.4.3"
 typedef struct {
     char title[40], local[256], remote[256];
     char local_sha[65], hub_sha[65], baseline[65], checked[65], status[64];
@@ -26,7 +26,7 @@ static char listing[32768], message[96]="Starting...", card_id[96]="";
 static PrintConsole top, bottom;
 enum { PAGE_HOME, PAGE_SAVES, PAGE_BOX_PICK };
 static int page=PAGE_HOME,home_selection;
-static int update_pending;
+static int update_pending, retry_automatic, offline_polls, retry_attempt;
 static const char *home_items[]={"My saves","Pokemon boxes","Connection settings","App updates","Diagnostics","Exit"};
 static unsigned short icon_font[1024];
 static void draw_wifi(void) {
@@ -240,9 +240,22 @@ static void reconnect(void) {
     if(net_login()){say("Login failed. Check card config.");return;}
     connected=1;
     debug_upload_previous(card_id);
-    update_app(1);refresh(1);
+    if(!retry_automatic)update_app(1);
+    refresh(1);
     if(update_pending)say("Update installed. Restart app.");
 }
+static void poll_hub(void){
+    static const unsigned retry_seconds[]={5,5,5,5,10,10,10,20,20,30};
+    if(connected){offline_polls=0;retry_attempt=0;refresh(0);}
+    else if(++offline_polls*5>=retry_seconds[retry_attempt]){
+        offline_polls=0;retry_automatic=1;
+        debug_log("Automatic reconnect attempt=%d",retry_attempt+1);
+        reconnect();retry_automatic=0;
+        if(connected)retry_attempt=0;
+        else if(retry_attempt<9)retry_attempt++;
+    }
+}
+
 int main(void) {
     defaultExceptionHandler();
     videoSetMode(MODE_5_2D);videoSetModeSub(MODE_5_2D);
@@ -292,7 +305,7 @@ int main(void) {
                 frames=0;
             }
             if(quit)break;
-            if(++frames>=300){frames=0;if(connected)refresh(0);}
+            if(++frames>=300){frames=0;poll_hub();}
             continue;
         }
         if(keys&KEY_B){page=PAGE_HOME;draw();continue;}
@@ -317,7 +330,7 @@ int main(void) {
                 else say("Ready. Watching hub changes.");
             }frames=0;draw();
         }
-        if(++frames>=300){frames=0;if(connected)refresh(0);}
+        if(++frames>=300){frames=0;poll_hub();}
     }
     if(connected)live_pulse(1);
     debug_log("EXIT normal");

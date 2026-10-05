@@ -4,7 +4,7 @@ Windows fork of [andrewbenington/OpenHome](https://github.com/andrewbenington/Op
 
 This adds **LAN console saves** to the Home page. Connect to the hub, keep OpenHome DS **v0.4.0 or later** on the console's home/save-sync screen, and open a synchronized DS save. Box edits save automatically after a short delay. Destructive releases retain OpenHome's explicit confirmation. Windows waits for the console to acknowledge the edited checksum before reporting success.
 
-The DSi app must be running and awake; playing a game, leaving the app, or losing Wi-Fi locks editing. Presence is checked by a heartbeat (5-second idle polling, 25-second expiry), so abrupt disconnections can take up to 25 seconds to be detected. Settings and box browsing on the DSi do not currently run background sync. Return to its home screen for PC editing.
+The DSi app must be running and awake; playing a game, leaving the app, or losing Wi-Fi locks editing. Presence is checked by a heartbeat (5-second idle polling, 25-second expiry), so abrupt disconnections can take up to 25 seconds to be detected. Settings and box browsing on the DSi do not currently run background sync. Return to its home screen for PC editing. DS client v0.4.3 retries failed connections after 5, 5, 5, 5, 10, 10, 10, 20, 20, then 30 seconds, keeping 30 seconds thereafter; a successful connection resets the schedule. These are waits between attempts; an individual connection attempt may also take time.
 
 The first release opens **one live remote save at a time**, without other local saves open. Transfers to the Windows HOME bank use the existing editor. The bank belongs to this Windows installation; this does not introduce a shared Switch/Windows HOME bank.
 

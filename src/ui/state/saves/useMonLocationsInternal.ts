@@ -1,3 +1,4 @@
+import { liveHub } from '@openhome-core/lan/liveHub'
 import { PKMInterface } from '@openhome-core/pkm/interfaces'
 import { OhpkmIdentifier } from '@openhome-core/pkm/Lookup'
 import { OHPKM } from '@openhome-core/pkm/OHPKM'
@@ -48,6 +49,9 @@ export function useMonLocationsInternal() {
   }
 
   async function moveMon(source: MonLocation, dest: MonLocation): Promise<Result<null>> {
+    for (const location of [source, dest])
+      if (!location.isHome)
+        liveHub.assertEditable(saveFromIdentifier(location.saveIdentifier).filePath.raw)
     if (source.isHome) {
       return dest.isHome ? moveHomeMonToHome(source, dest) : moveHomeMonToSave(source, dest)
     } else {
@@ -295,6 +299,7 @@ export function useMonLocationsInternal() {
   }
 
   const moveBoxToBank = async (save: SAV): Promise<MovedPokemonCount> => {
+    liveHub.assertEditable(save.filePath.raw)
     let movedCount = 0
     const boxSize = OPENHOME_BOX_SLOTS
     let currentBankBox = banksAndBoxes.getCurrentBox().index
@@ -354,6 +359,7 @@ export function useMonLocationsInternal() {
   }
 
   const moveSaveToBank = async (save: SAV): Promise<MovedPokemonCount> => {
+    liveHub.assertEditable(save.filePath.raw)
     let totalMoved = 0
     let currentBankBox = banksAndBoxes.getCurrentBox().index
     let currentSlot = 0

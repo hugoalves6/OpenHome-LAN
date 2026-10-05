@@ -1,3 +1,4 @@
+import { liveHub, isRemoteSave } from '@openhome-core/lan/liveHub'
 import useBackend from '@openhome-core/backend/useBackend'
 import { PKMInterface } from '@openhome-core/pkm/interfaces'
 import { OhpkmIdentifier } from '@openhome-core/pkm/Lookup'
@@ -209,6 +210,13 @@ export function useSaves(): SavesAndBanksManager {
 
   const addSave = async (save: SAV): Promise<Result<SAV, SaveError>> => {
     try {
+      if (isRemoteSave(save.filePath.raw)) {
+        const setMonAt = save.setMonAt.bind(save)
+        save.setMonAt = (...args: Parameters<typeof save.setMonAt>) => {
+          liveHub.assertEditable(save.filePath.raw)
+          return Reflect.apply(setMonAt, save, args)
+        }
+      }
       await backend.addRecentSave(getSaveRef(save))
       const result = await backend.registerInPokedex(pokedexSeenFromSave(save))
       if (R.isErr(result)) {
@@ -275,6 +283,12 @@ export function useSaves(): SavesAndBanksManager {
       filePath = result.data
     }
 
+    if (
+      allOpenSaves.length &&
+      (isRemoteSave(filePath.raw) || allOpenSaves.some((save) => isRemoteSave(save.filePath.raw)))
+    ) {
+      return R.Err({ type: 'OTHER', cause: 'Close other saves before editing a live console save' })
+    }
     if (allOpenSaves.some((other) => other.filePath.raw === filePath.raw)) {
       return R.Err({ type: 'ALREADY_OPEN' })
     }
@@ -321,6 +335,7 @@ export function useSaves(): SavesAndBanksManager {
   }
 
   const removeSave = (save: SAV) => {
+    if (isRemoteSave(save.filePath.raw)) void liveHub.close(save.filePath.raw)
     openSavesDispatch({ type: 'remove_save', payload: save })
   }
 

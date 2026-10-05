@@ -287,9 +287,9 @@ fn get_default_data_dir() -> Result<PathBuf> {
 }
 
 pub fn get_openhome_default_data_dir() -> Result<PathBuf> {
-    get_default_data_dir().map(|dir| dir.join("OpenHome"))
+    get_default_data_dir().map(|dir| dir.join("OpenHome LAN"))
 }
 
 pub fn get_openhome_config_dir() -> Result<PathBuf> {
-    get_config_dir().map(|dir| dir.join("OpenHome"))
+    get_config_dir().map(|dir| dir.join("OpenHome LAN"))
 }

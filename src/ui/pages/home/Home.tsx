@@ -1,3 +1,4 @@
+import LiveHubPanel from '@openhome-ui/saves/LiveHubPanel'
 import useBackend from '@openhome-core/backend/useBackend'
 import { bytesToPKM } from '@openhome-core/pkm/FileImport'
 import { PKMInterface } from '@openhome-core/pkm/interfaces'
@@ -71,6 +72,7 @@ const Home = () => {
         {range(savesAndBanks.allOpenSaves.length).map((i) => (
           <OpenSaveDisplay key={`save_display_${i}`} saveIndex={i} />
         ))}
+        <LiveHubPanel />
         <Button onClick={() => setOpenSaveDialog(true)}>
           <MdFileOpen />
           Open Save

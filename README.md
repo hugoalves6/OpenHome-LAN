@@ -1,3 +1,5 @@
+> **OpenHome LAN fork:** online-only DS save editing and verified automatic card delivery. See [LAN setup and limitations](lan/README.md). Based on upstream 1.18.0.
+
 ![GitHub Release](https://img.shields.io/github/v/release/andrewbenington/OpenHome)
 ![GitHub Release Date](https://img.shields.io/github/release-date/andrewbenington/OpenHome)
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/andrewbenington/OpenHome/total)

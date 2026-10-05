@@ -1,3 +1,4 @@
+import { liveHub, isRemoteSave } from '../lan/liveHub'
 import BackendInterface, {
   BankOrBoxChange,
   LogEntry,
@@ -170,6 +171,13 @@ export const TauriBackend: BackendInterface = {
 
   /* game saves */
   loadSaveFile: async (pathData: PathData): Promise<Errorable<LoadSaveResponse>> => {
+    if (isRemoteSave(pathData.raw)) {
+      try {
+        return R.Ok({ path: pathData, fileBytes: await liveHub.load(pathData.raw) })
+      } catch (error) {
+        return R.Err(String(error))
+      }
+    }
     const bytesResult = await Commands.get_file_bytes(pathData.raw)
     if (R.isErr(bytesResult)) {
       return bytesResult
@@ -184,13 +192,27 @@ export const TauriBackend: BackendInterface = {
       createdDate: timestampResult.data ? new Date(timestampResult.data) : undefined,
     })
   },
-  writeSaveFile: async (path: string, bytes: Uint8Array) =>
-    Commands.writeFileBytes(path, Array.from(bytes)),
+  writeSaveFile: async (path: string, bytes: Uint8Array) => {
+    if (!isRemoteSave(path)) return Commands.writeFileBytes(path, Array.from(bytes))
+    try {
+      await liveHub.write(path, bytes)
+      return R.Ok(null)
+    } catch (error) {
+      return R.Err(String(error))
+    }
+  },
   writeAllSaveFiles: async (saveWriters: SaveWriter[]) =>
     Promise.all(
-      saveWriters.map((saveWriter) =>
-        Commands.writeFileBytes(saveWriter.filepath, Array.from(saveWriter.bytes))
-      )
+      saveWriters.map(async (saveWriter) => {
+        if (!isRemoteSave(saveWriter.filepath))
+          return Commands.writeFileBytes(saveWriter.filepath, Array.from(saveWriter.bytes))
+        try {
+          await liveHub.write(saveWriter.filepath, saveWriter.bytes)
+          return R.Ok(null)
+        } catch (error) {
+          return R.Err(String(error))
+        }
+      })
     ),
   saveLocalFile: async (bytes: Uint8Array, suggestedName: string) => {
     const defaultPath = await path.join(await path.downloadDir(), suggestedName)
@@ -207,18 +229,20 @@ export const TauriBackend: BackendInterface = {
       })
     ),
   addRecentSave: (saveRef: SaveRef): Promise<Errorable<null>> =>
-    Commands.get_storage_file_json('recent_saves.json').then(
-      R.asyncFlatMap((recentSaves) => {
-        if (Array.isArray(recentSaves)) {
-          return Promise.resolve(
-            R.Err('recent_saves.json is malformed (expecting object, received array)')
-          )
-        }
+    isRemoteSave(saveRef.filePath.raw)
+      ? Promise.resolve(R.Ok(null))
+      : Commands.get_storage_file_json('recent_saves.json').then(
+          R.asyncFlatMap((recentSaves) => {
+            if (Array.isArray(recentSaves)) {
+              return Promise.resolve(
+                R.Err('recent_saves.json is malformed (expecting object, received array)')
+              )
+            }
 
-        recentSaves[saveRef.filePath.raw] = { ...saveRef, lastOpened: dayjs().unix() * 1000 }
-        return Commands.write_storage_file_json('recent_saves.json', recentSaves)
-      })
-    ),
+            recentSaves[saveRef.filePath.raw] = { ...saveRef, lastOpened: dayjs().unix() * 1000 }
+            return Commands.write_storage_file_json('recent_saves.json', recentSaves)
+          })
+        ),
   removeRecentSave: (filePath: string): Promise<Errorable<null>> =>
     Commands.get_storage_file_json('recent_saves.json').then(
       R.asyncFlatMap((recentSaves) => {

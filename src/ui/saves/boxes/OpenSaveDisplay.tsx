@@ -1,3 +1,4 @@
+import { liveHub, isRemoteSave } from '@openhome-core/lan/liveHub'
 import useBackend from '@openhome-core/backend/useBackend'
 import { PKMInterface } from '@openhome-core/pkm/interfaces'
 import { OHPKM } from '@openhome-core/pkm/OHPKM'
@@ -24,7 +25,7 @@ import { EMPTY_SLOT, MonLocation, useSaves } from '@openhome-ui/state/saves'
 import { colorIsDark } from '@openhome-ui/util/color'
 import { MetadataSummaryLookup } from '@pkm-rs/pkg'
 import { Button, Dialog, Flex, Grid, Separator } from '@radix-ui/themes'
-import { useContext, useMemo, useState } from 'react'
+import { useContext, useMemo, useState, useSyncExternalStore } from 'react'
 import { MdClose } from 'react-icons/md'
 import useMultiSelect from '../../state/drag-and-drop/useMultiSelect'
 import { cssClass } from '../../util/style'
@@ -37,6 +38,7 @@ interface OpenSaveDisplayProps {
 }
 
 const OpenSaveDisplay = (props: OpenSaveDisplayProps) => {
+  useSyncExternalStore(liveHub.subscribe, liveHub.snapshot)
   const savesManager = useSaves()
   const { allOpenSaves, importMonsToLocation } = savesManager
 
@@ -115,9 +117,12 @@ const OpenSaveDisplay = (props: OpenSaveDisplayProps) => {
 
   const displayData = useMemo(() => save.getDisplayData?.() ?? {}, [save])
 
-  const allCellsDisabled = range(save.boxColumns * save.boxRows)
-    .map((index: number) => save.getMonAt(save.currentPCBox, index))
-    .every(canSwapWithDragging)
+  const remoteLock = liveHub.lockReason(save.filePath.raw)
+  const allCellsDisabled =
+    !!remoteLock ||
+    range(save.boxColumns * save.boxRows)
+      .map((index: number) => save.getMonAt(save.currentPCBox, index))
+      .every(canSwapWithDragging)
 
   const slots = range(save.boxColumns * save.boxRows)
     .map((index: number) => save.getMonAt(save.currentPCBox, index))
@@ -161,9 +166,20 @@ const OpenSaveDisplay = (props: OpenSaveDisplayProps) => {
       return { save, mon, openhomeId, pendingMon }
     })
 
-  return save && save.currentPCBox !== undefined ? (
+  return remoteLock ? (
+    <Flex direction="column" gap="2" style={{ padding: 16 }}>
+      <strong>Console save locked</strong>
+      <span>{remoteLock}</span>
+      <Button onClick={() => savesManager.removeSave(save)}>Close remote save</Button>
+    </Flex>
+  ) : save && save.currentPCBox !== undefined ? (
     <>
       <Flex direction="column" width="100%">
+        {isRemoteSave(save.filePath.raw) && (
+          <div role="status" style={{ padding: 8 }}>
+            {remoteLock || 'DSi online ? edits save automatically'}
+          </div>
+        )}
         <div
           className={cssClass('save-box-card')
             .with('save-box-card-disabled')
@@ -379,7 +395,7 @@ function SaveHeader({ save, setDetailsModal }: SaveHeaderProps) {
             <Button
               className="save-close-button mini-button"
               onClick={() => savesManager.removeSave(save)}
-              disabled={!!save.updatedBoxSlots.length}
+              disabled={!!save.updatedBoxSlots.length && !liveHub.lockReason(save.filePath.raw)}
             >
               <MdClose />
             </Button>

@@ -1,3 +1,4 @@
+import { liveHub, isRemoteSave } from '@openhome-core/lan/liveHub'
 import useBackend from '@openhome-core/backend/useBackend'
 import { OhpkmIdentifier } from '@openhome-core/pkm/Lookup'
 import { OHPKM } from '@openhome-core/pkm/OHPKM'
@@ -35,7 +36,13 @@ export default function SavesProvider({ children }: SavesProviderProps) {
   const backend = useBackend()
   const [itemBagState, bagDispatch] = useContext(ItemBagContext)
   const [releaseWarningDisplayed, setReleaseWarningDisplayed] = useState(false)
-  const [saving, setSaving] = useState(false)
+  const [saving, setSavingState] = useState(false)
+  const saveInFlight = useRef(false)
+  const autoFailed = useRef('')
+  const setSaving = (value: boolean) => {
+    saveInFlight.current = value
+    setSavingState(value)
+  }
   const [changesSavedDisplayed, setChangesSavedDisplayed] = useState(false)
   const displayError = useDisplayError()
   const [openSavesState, openSavesDispatch] = useReducer(openSavesReducer, {
@@ -63,8 +70,16 @@ export default function SavesProvider({ children }: SavesProviderProps) {
     .map((data) => data.save)
 
   const saveChanges = useCallback(
-    async (releaseWarningAccepted: boolean): Promise<Result<null, SaveError[]>> => {
-      if (saving) return R.Ok(null)
+    async (
+      releaseWarningAccepted: boolean,
+      automatic = false
+    ): Promise<Result<null, SaveError[]>> => {
+      if (saveInFlight.current) return R.Ok(null)
+      try {
+        await liveHub.preflight(allOpenSaves.map((save) => save.filePath.raw))
+      } catch (error) {
+        return R.Err([BackendSaveError(String(error))])
+      }
 
       const shouldReleasePokemon = openSavesState.monsToRelease.length > 0
       if (shouldReleasePokemon && !releaseWarningAccepted) {
@@ -95,6 +110,8 @@ export default function SavesProvider({ children }: SavesProviderProps) {
 
             const converted = save.convertOhpkm(trackedData, defaultConvertStrategy)
             if (R.isErr(converted)) {
+              await backend.rollbackTransaction()
+              setSaving(false)
               return Promise.resolve(R.Err([PkmConversion(converted.error)]))
             }
             $R(save.convertOhpkm(trackedData, defaultConvertStrategy)).map((mon) =>
@@ -152,13 +169,12 @@ export default function SavesProvider({ children }: SavesProviderProps) {
       openSavesDispatch({ type: 'clear_updated_box_slots' })
       openSavesDispatch({ type: 'clear_mons_to_release' })
 
-      setChangesSavedDisplayed(true)
+      setChangesSavedDisplayed(!automatic)
 
       setSaving(false)
       return R.Ok(null)
     },
     [
-      saving,
       backend,
       allOpenSaves,
       openSavesState.monsToRelease,
@@ -170,6 +186,31 @@ export default function SavesProvider({ children }: SavesProviderProps) {
       bagDispatch,
     ]
   )
+
+  const autoSave = useEffectEvent(async () => {
+    const remote = allOpenSaves.filter(
+      (save) => isRemoteSave(save.filePath.raw) && save.updatedBoxSlots.length
+    )
+    if (
+      !remote.length ||
+      saveInFlight.current ||
+      openSavesState.pendingMonLocations.length ||
+      openSavesState.monsToRelease.length
+    )
+      return
+    if (remote.some((save) => liveHub.lockReason(save.filePath.raw))) return
+    const signature = JSON.stringify(
+      remote.map((save) => [save.filePath.raw, save.updatedBoxSlots])
+    )
+    if (signature === autoFailed.current) return
+    const result = await saveChanges(false, true)
+    if (R.isErr(result)) autoFailed.current = signature
+    else autoFailed.current = ''
+  })
+  useEffect(() => {
+    const timer = setInterval(() => void autoSave(), 2000)
+    return () => clearInterval(timer)
+  }, [])
 
   // load bag
   useEffect(() => {
@@ -194,6 +235,9 @@ export default function SavesProvider({ children }: SavesProviderProps) {
     const stopListening = backend.onMenuEvents({
       save: () => saveChanges(false),
       reset: () => {
+        if (saveInFlight.current) return
+        for (const save of allOpenSaves)
+          if (isRemoteSave(save.filePath.raw)) void liveHub.close(save.filePath.raw)
         openSavesDispatch({ type: 'clear_mons_to_release' })
         reloadBankStore()
         clearOhpkmCache()
@@ -206,7 +250,7 @@ export default function SavesProvider({ children }: SavesProviderProps) {
     return () => {
       stopListening()
     }
-  }, [backend, saveChanges, openSavesDispatch, bagDispatch, reloadBankStore])
+  }, [backend, saveChanges, openSavesDispatch, bagDispatch, reloadBankStore, allOpenSaves])
 
   if (openSavesState.error) {
     return (

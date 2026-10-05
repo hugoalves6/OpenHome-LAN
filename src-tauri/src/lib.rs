@@ -2,6 +2,7 @@ mod commands;
 mod data_controller;
 mod deprecated;
 mod logging;
+mod lan_hub;
 mod menu;
 mod plugin;
 mod startup;
@@ -22,6 +23,7 @@ use std::env;
 use tauri::Manager;
 
 const RAW_HANDLER: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+    lan_hub::lan_hub_request,
     commands::get_file_bytes,
     commands::get_storage_file_json,
     commands::write_storage_file_json,
@@ -179,7 +181,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(move |invoke| match invoke.message.command() {
-            "get_file_bytes"
+            "lan_hub_request"
+            | "get_file_bytes"
             | "get_storage_file_json"
             | "write_storage_file_json"
             | "add_to_ohpkm_store"

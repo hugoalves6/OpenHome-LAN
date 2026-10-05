@@ -16,7 +16,7 @@ include $(DEVKITARM)/ds_rules
 # MAXMOD_SOUNDBANK contains a directory of music and sound effect files
 #---------------------------------------------------------------------------------
 TARGET := OpenHomeMini
-GAME_TITLE := OpenHome Mini
+GAME_TITLE := OpenHome DS
 GAME_SUBTITLE1 := LAN save sync
 GAME_SUBTITLE2 := R4i and DSPico
 BUILD		:=	build
@@ -58,6 +58,7 @@ ifneq ($(BUILD),$(notdir $(CURDIR)))
 #---------------------------------------------------------------------------------
 
 export OUTPUT	:=	$(CURDIR)/$(TARGET)
+export GAME_ICON := $(CURDIR)/assets/icon.bmp
 
 export VPATH	:=	$(foreach dir,$(SOURCES),$(CURDIR)/$(dir)) \
 					$(foreach dir,$(DATA),$(CURDIR)/$(dir))
@@ -111,7 +112,7 @@ else
 #---------------------------------------------------------------------------------
 # main targets
 #---------------------------------------------------------------------------------
-$(OUTPUT).nds	: 	$(OUTPUT).elf
+$(OUTPUT).nds	: 	$(OUTPUT).elf $(GAME_ICON)
 $(OUTPUT).elf	:	$(OFILES)
 
 #---------------------------------------------------------------------------------

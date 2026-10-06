@@ -15,7 +15,7 @@
 #include "github_update.h"
 
 #define MAX_SAVES 8
-#define APP_VERSION "0.5.0"
+#define APP_VERSION "0.5.1"
 typedef struct {
     char title[40], local[256], remote[256];
     char local_sha[65], hub_sha[65], baseline[65], checked[65], status[64];
@@ -25,10 +25,12 @@ static Save saves[MAX_SAVES];
 static int count=0, selected=0, connected=0, wifi_started=0;
 static char listing[32768], message[96]="Starting...", card_id[96]="";
 static PrintConsole top, bottom;
-enum { PAGE_HOME, PAGE_SAVES, PAGE_BOX_PICK };
+enum { PAGE_HOME, PAGE_SAVES, PAGE_BOX_PICK, PAGE_UPDATES };
 static int page=PAGE_HOME,home_selection;
 static int update_pending, retry_automatic, offline_polls, retry_attempt;
 static int offline_mode, connection_failures;
+static int update_busy,update_available,updates_selection;
+static char update_version[40],update_hash[65],update_url[512];
 static const char *home_items[]={"My saves","Pokemon boxes","Connection settings","App updates","Diagnostics","Exit"};
 static unsigned short icon_font[1024];
 static void draw_wifi(void) {
@@ -48,6 +50,7 @@ static void draw_wifi(void) {
 static void draw(void) {
     int first=(selected/4)*4,rows=count-first;if(rows>4)rows=4;
     if(page==PAGE_HOME)theme_home(home_selection);
+    else if(page==PAGE_UPDATES)theme_saves(updates_selection,2);
     else theme_saves(selected-first,rows);
     consoleSelect(&top); consoleClear();
     char label[96];
@@ -56,13 +59,37 @@ static void draw(void) {
     snprintf(label,sizeof(label),"%s:%d",hub_host,hub_port);theme_text(&top,16,112,36,label);
     snprintf(label,sizeof(label),"%.28s",message);theme_text(&top,16,136,37,label);
     if(strlen(message)>28)theme_text(&top,16,144,37,message+28);
+    if(update_available&&!update_busy&&!update_pending)theme_text(&top,16,152,33,"Go to App updates to update");
     snprintf(label,sizeof(label),"LAN SAVE HUB       v%s",APP_VERSION);theme_text(&top,16,176,37,label);
     consoleSelect(&bottom);consoleClear();
     if(page==PAGE_HOME){
         snprintf(label,sizeof(label),"HOME                 %d GAMES",count);theme_text(&bottom,16,8,37,label);
-        for(int i=0;i<6;i++)theme_home_label(&bottom,i,i==home_selection?33:37,home_items[i]);
+        for(int i=0;i<6;i++)theme_home_label(&bottom,i,i==home_selection?33:37,i==3&&update_available?"App updates *":home_items[i]);
         theme_text(&bottom,8,176,37,"A Open  Touch Select");
         theme_text(&bottom,8,184,37,"START Exit");
+        draw_wifi();return;
+    }
+    if(page==PAGE_UPDATES){
+        if(update_pending||update_busy)theme_dialog(1);
+        theme_text(&bottom,16,8,37,"APP UPDATES");
+        if(update_pending){
+            theme_text(&bottom,16,40,33,"Update installed.");
+            theme_text(&bottom,16,64,37,"Press START to close the app.");
+            theme_text(&bottom,16,88,37,"Then open OpenHome DS again.");
+            theme_text(&bottom,16,120,36,"Save sync stays paused.");
+            theme_text(&bottom,8,176,37,"START Close app");
+        }else if(update_busy){
+            theme_text(&bottom,16,40,33,"Updating application...");
+            theme_text(&bottom,16,72,36,"Save sync is paused.");
+            theme_text(&bottom,8,176,37,"B Cancel download");
+        }else{
+            theme_text(&bottom,24,40,updates_selection==0?33:37,"Check for updates");
+            theme_text(&bottom,24,72,update_available?(updates_selection==1?33:37):36,"Install update");
+            snprintf(label,sizeof(label),"Installed: %s",APP_VERSION);theme_text(&bottom,16,112,36,label);
+            if(update_available){snprintf(label,sizeof(label),"Available: %.20s",update_version);theme_text(&bottom,16,128,33,label);}
+            theme_text(&bottom,8,176,37,"A Select  Touch Select");
+            theme_text(&bottom,8,184,37,"B Home  START Exit");
+        }
         draw_wifi();return;
     }
     snprintf(label,sizeof(label),"%s         %d/%d",page==PAGE_SAVES?"MY SAVES":"CHOOSE GAME",selected+1,count);theme_text(&bottom,16,8,37,label);
@@ -154,6 +181,7 @@ static int receive_save(Save *s) {
     return remember(s,current);
 }
 static int sync_save(Save *s,int forced) {
+    if(update_busy||update_pending)return -1;
     debug_log("SYNC begin remote=%s forced=%d",s->remote,forced);
     if(mini_sha_file(s->local,s->local_sha)){snprintf(s->status,sizeof(s->status),"Save unreadable");return -1;}
     if(hub_hash(s)<0){snprintf(s->status,sizeof(s->status),"Invalid hub checksum");return -1;}
@@ -192,6 +220,7 @@ static void live_pulse(int closing){
     if(net_live_pulse(body))debug_log("Live presence report failed");
 }
 static int refresh(int full) {
+    if(update_busy||update_pending)return -1;
     if(!connected)return -1;
     if(net_listing(listing,sizeof(listing))) {
         if(net_login()||net_listing(listing,sizeof(listing))){connected=0;say("Hub unavailable. L to retry.");return -1;}
@@ -212,24 +241,50 @@ static int refresh(int full) {
     }
     live_pulse(0);say("Ready. Watching hub changes.");return 0;
 }
-static void update_app(int automatic) {
-    if(update_pending){say("Update installed. Restart app.");return;}
-    char info[1024],version[40],hash[65],current[65],url[512];
+static void check_app_update(int automatic) {
+    if(update_busy||update_pending)return;
+    char info[1024],version[40],hash[65],url[512];
     say("Checking GitHub for update...");
     if(github_update_info(info,sizeof(info))){if(!automatic)say(net_error);else say("GitHub check unavailable.");return;}
     if(mini_json_string(info,"version",version,sizeof(version)) ||
        mini_json_string(info,"sha256",hash,sizeof(hash)) || strlen(hash)!=64 ||
        mini_json_string(info,"url",url,sizeof(url))){say("Invalid GitHub update info.");return;}
-    if(!github_update_newer(version,APP_VERSION)){if(!automatic)say("App is already up to date.");return;}
-    if(!confirm("Install app update?"))return;
+    update_available=github_update_newer(version,APP_VERSION);
+    if(!update_available){if(!automatic)say("App is already up to date.");return;}
+    strcpy(update_version,version);strcpy(update_hash,hash);strcpy(update_url,url);
+    say("Update found. Go to App updates.");
+}
+static int confirm_app_update(void){
+    consoleSelect(&bottom);consoleClear();theme_dialog(1);
+    char label[64];snprintf(label,sizeof(label),"Install version %.20s?",update_version);
+    theme_text(&bottom,16,8,37,"APP UPDATE");
+    theme_text(&bottom,16,48,33,label);
+    theme_text(&bottom,16,80,37,"Save sync pauses until done.");
+    theme_text(&bottom,16,104,36,"After installing, close the");
+    theme_text(&bottom,16,120,36,"app with START and reopen it.");
+    theme_text(&bottom,8,176,37,"A Install  B Cancel");
+    while(1){swiWaitForVBlank();scanKeys();int keys=keysDown();
+        if(keys&KEY_A)return 1;
+        if(keys&(KEY_B|KEY_START))return 0;
+    }
+}
+static void install_app_update(void) {
+    if(update_busy||update_pending)return;
+    if(!update_available){say("Check for updates first.");return;}
+    if(!confirm_app_update()){draw();return;}
+    update_busy=1;draw();
+    /* Withdraw card presence before a long update, so PC edits are locked too. */
+    if(connected)live_pulse(1);
     say("Downloading update. B cancels.");
-    if(github_update_download(url,"/OpenHomeMini.nds.new",hash)) {say(net_error);return;}
-    if(mini_sha_file("/OpenHomeMini.nds",current)){say("App file missing. Update stopped.");return;}
+    if(github_update_download(update_url,"/OpenHomeMini.nds.new",update_hash)) {update_busy=0;say(net_error);return;}
+    char current[65];
+    if(mini_sha_file("/OpenHomeMini.nds",current)){update_busy=0;say("App file missing. Update stopped.");return;}
     char backup[96];snprintf(backup,sizeof(backup),"/OpenHomeMini.nds.backup.%lu",(unsigned long)time(NULL));
     for(unsigned i=0;access(backup,F_OK)==0;i++)snprintf(backup,sizeof(backup),"/OpenHomeMini.nds.backup.%lu-%u",(unsigned long)time(NULL),i);
-    if(rename("/OpenHomeMini.nds",backup)){say("Cannot back up app. Update stopped.");return;}
-    if(rename("/OpenHomeMini.nds.new","/OpenHomeMini.nds")){rename(backup,"/OpenHomeMini.nds");say("Install failed. Backup retained.");return;}
-    update_pending=1;say("Update installed. Restart app.");
+    if(rename("/OpenHomeMini.nds",backup)){update_busy=0;say("Cannot back up app. Update stopped.");return;}
+    if(rename("/OpenHomeMini.nds.new","/OpenHomeMini.nds")){rename(backup,"/OpenHomeMini.nds");update_busy=0;say("Install failed. Backup retained.");return;}
+    update_pending=1;update_busy=0;
+    say("Installed. START closes app; then open it again.");
 }
 static int connection_choice(int no_wifi) {
     say(no_wifi?"No Wi-Fi connection available.":"Hub connection failed 3 times.");
@@ -276,22 +331,21 @@ static void reconnect(void) {
         if(Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED){say("Wi-Fi unavailable. L to retry.");connection_failed(1);return;}
     }
     /* Once provisioned, checking GitHub works even with the hub switched off. */
-    if(!retry_automatic&&github_update_ready())update_app(1);
+    if(!retry_automatic&&github_update_ready())check_app_update(1);
     say("Connecting to your hub...");
     if(net_login()){say("Login failed. Check card config.");connection_failed(Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED);return;}
     connected=1;
     int had_updater_seed=github_update_ready();
     github_update_seed(hub_token);
     debug_upload_previous(card_id);
-    if(!retry_automatic&&!had_updater_seed)update_app(1);
+    if(!retry_automatic&&!had_updater_seed)check_app_update(1);
     refresh(1);
     if(connected)connection_failures=0;
     else connection_failed(Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED);
-    if(update_pending)say("Update installed. Restart app.");
 }
 static void poll_hub(void){
     static const int retry_seconds[]={5,5,5,5,10,10,10,20,20,30};
-    if(offline_mode)return;
+    if(offline_mode||update_busy||update_pending)return;
     if(connected){
         if(Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED){connection_failed(1);return;}
         offline_polls=0;retry_attempt=0;refresh(0);
@@ -333,8 +387,26 @@ int main(void) {
     reconnect();int frames=0;
     while(1){
         swiWaitForVBlank();scanKeys();int keys=keysDown();
-        if(!(frames%60))draw_wifi();
         if(keys&KEY_START)break;
+        if(update_pending||update_busy)continue;
+        if(!(frames%60))draw_wifi();
+        if(page==PAGE_UPDATES){
+            int activate=keys&KEY_A;
+            if(keys&KEY_B){page=PAGE_HOME;draw();continue;}
+            if(keys&(KEY_UP|KEY_DOWN)){updates_selection^=1;draw();}
+            if(keys&KEY_TOUCH){touchPosition t;touchRead(&t);
+                if(t.px>=8&&t.px<248&&t.py>=32&&t.py<92){updates_selection=(t.py-32)/32;activate=1;}
+            }
+            if(activate){
+                if(!updates_selection){
+                    if(!wifi_started||Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED)reconnect();
+                    if(wifi_started&&Wifi_AssocStatus()==ASSOCSTATUS_ASSOCIATED)check_app_update(0);
+                }else install_app_update();
+                draw();frames=0;
+            }
+            if(++frames>=300){frames=0;poll_hub();}
+            continue;
+        }
         if(page==PAGE_HOME){
             int activate=keys&KEY_A,quit=0;
             if(keys&KEY_UP){home_selection=(home_selection+5)%6;draw();}
@@ -352,9 +424,7 @@ int main(void) {
                     else draw();
                 }
                 else if(home_selection==3){
-                    if(!wifi_started||Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED)reconnect();
-                    if(wifi_started&&Wifi_AssocStatus()==ASSOCSTATUS_ASSOCIATED)update_app(0);
-                    draw();
+                    page=PAGE_UPDATES;updates_selection=update_available?1:0;draw();
                 }
                 else if(home_selection==4){settings_diagnostics(&top,&bottom,APP_VERSION);draw();}
                 else quit=1;
@@ -371,7 +441,7 @@ int main(void) {
             if(touch.py>=32&&touch.py<160){int choice=(selected/4)*4+(touch.py-32)/32;if(choice<count){selected=choice;draw();}}
         }
         if(keys&KEY_L){reconnect();frames=0;}
-        if((keys&KEY_R)&&wifi_started&&Wifi_AssocStatus()==ASSOCSTATUS_ASSOCIATED){update_app(0);frames=0;}
+        if(keys&KEY_R){page=PAGE_UPDATES;updates_selection=update_available?1:0;draw();frames=0;continue;}
         if(connected&&((keys&KEY_SELECT)||(page==PAGE_BOX_PICK&&(keys&KEY_A)))){
             Save *s=&saves[selected];
             if(net_listing(listing,sizeof(listing))||hub_hash(s)<0||mini_sha_file(s->local,s->local_sha))say("Cannot check save. L to retry.");
@@ -388,7 +458,7 @@ int main(void) {
         }
         if(++frames>=300){frames=0;poll_hub();}
     }
-    if(connected)live_pulse(1);
+    if(connected&&!update_pending)live_pulse(1);
     debug_log("EXIT normal");
     return 0;
 }

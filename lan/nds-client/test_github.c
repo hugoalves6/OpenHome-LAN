@@ -36,9 +36,9 @@ int main(int argc,char **argv){
     assert(br_ssl_engine_last_error(&client.eng)==BR_ERR_X509_BAD_SERVER_NAME);
     assert(access("/tmp/openhome-github-wrong-name",F_OK));test_server_name=NULL;
     // Check the published manifest over independently verified HTTPS as well.
-    if(!strcmp(argv[3],"manifest")){
+    if(strcmp(argv[3],"skip")){
         char manifest[1024],version[40];assert(!github_update_info(manifest,sizeof(manifest)));
-        assert(!mini_json_string(manifest,"version",version,sizeof(version)));assert(!strcmp(version,"0.5.0"));
+        assert(!mini_json_string(manifest,"version",version,sizeof(version)));assert(!strcmp(version,argv[3]));
     }
     remove(GITHUB_SEED_PATH);remove("/tmp/openhome-github-download");
     puts("GitHub HTTPS, redirect download, checksum rejection, URL restrictions, and version checks passed");

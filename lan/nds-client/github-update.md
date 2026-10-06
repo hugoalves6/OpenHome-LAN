@@ -1,4 +1,4 @@
-# Direct GitHub app updates (v0.5.0)
+# Direct GitHub app updates (v0.5.1)
 
 The DS app itself fetches this fixed, public manifest over HTTPS:
 `https://raw.githubusercontent.com/hugoalves6/OpenHome-LAN/lan-live-dsi/lan/nds-client/update.json`.
@@ -10,7 +10,15 @@ backup/rename installer. The old binary remains available if downloading or
 verification fails. Confirm installation with A and relaunch the app afterward.
 Saves and `openhome-mini.ini` are not replaced. No GitHub account/token is needed.
 
-Startup and App updates check GitHub. Once initialized, the manual App updates
+Startup only checks GitHub and shows a persistent notice if a newer release is
+available. It never starts an install or opens an installation prompt. Open
+App updates to select Check for updates or Install update, then confirm with A.
+During installation, save sync is disabled and the card's hub presence is
+withdrawn to lock PC editing. Failure/cancellation resumes polling. After success,
+the app displays "Press START to close the app" and "Then open OpenHome DS again";
+sync and navigation remain disabled until closing/relaunching.
+
+Once initialized, the manual App updates
 action works when the hub is offline, provided Wi-Fi has internet access.
 Hub reconnection retries do not repeatedly check GitHub. An offline update check
 fails without changing the installed app. The console clock must be correct.
@@ -49,7 +57,7 @@ decoded into a shared aligned buffer immediately before its DMA copy.
 4. Set `version`, lowercase `sha256` and the immutable release `url`.
 5. Keep earlier release assets intact for rollback/manual recovery.
 
-The Pi's old update endpoint serves v0.5.0 for consoles migrating from v0.4.x.
+The Pi's old update endpoint serves the current bootstrap for consoles migrating from v0.4.x.
 Future releases are fetched directly by the native app; no Pi update poller runs.
 
 Host tests exercise the actual TLS client against public GitHub releases,

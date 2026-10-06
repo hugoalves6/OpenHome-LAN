@@ -1,3 +1,4 @@
+import { R } from '@openhome-core/util/functional'
 import useBackend from '@openhome-core/backend/useBackend'
 import { AppInfoContext, Settings as SettingsType } from '@openhome-ui/state/appInfo'
 import { useContext } from 'react'
@@ -9,8 +10,10 @@ export default function useSettings() {
 
   async function updateSettings(newSettings: Partial<SettingsType>) {
     const updated = { ...appInfoState.settings, ...newSettings }
+    const result = await backend.updateSettings(updated)
+    if (R.isErr(result)) return result
     dispatchAppInfoState({ type: 'load_settings', payload: updated })
-    await backend.updateSettings(updated).catch(console.error)
+    return result
   }
 
   async function updateMonDisplayState(newState: Partial<MonDisplayState>) {
@@ -21,6 +24,7 @@ export default function useSettings() {
 
   return {
     settings: appInfoState.settings,
+    settingsLoaded: appInfoState.settingsLoaded,
     updateSettings,
     monDisplayState: appInfoState.settings.monDisplayState,
     updateMonDisplayState,

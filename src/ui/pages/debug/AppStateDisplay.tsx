@@ -46,7 +46,7 @@ export default function AppStateDisplay() {
 
 function appInfoDisplay(state: AppInfoState) {
   return {
-    settings: state.settings,
+    settings: { ...state.settings, lanHub: { ...state.settings.lanHub, password: '[hidden]' } },
     officialSaveTypes: state.officialSaveTypes.map((saveType) => saveType.name),
   }
 }

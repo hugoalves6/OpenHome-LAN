@@ -22,6 +22,7 @@ import { ReactNode, useEffect, useState } from 'react'
 import PromptDialog from '../components/dialog/PromptDialog'
 import useDisplayError from '../hooks/displayError'
 import { ConvertStrategyKey, useConvertStrategies } from '../state/convert-strategies'
+import LanHubSettings from './LanHubSettings'
 import './Settings.css'
 
 export default function SettingsPage() {
@@ -30,6 +31,7 @@ export default function SettingsPage() {
       defaultTab="general"
       parentPathSegment="settings"
       routes={[
+        { route: 'lan', display: 'LAN Hub', component: <LanHubSettings /> },
         {
           route: 'general',
           display: 'General',

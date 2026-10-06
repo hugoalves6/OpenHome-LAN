@@ -346,6 +346,11 @@ export const TauriBackend: BackendInterface = {
       R.map((partialSettings) => ({
         ...defaultSettings,
         ...partialSettings,
+        lanHub: {
+          ...defaultSettings.lanHub,
+          address: localStorage.getItem('openhome-lan-hub') || defaultSettings.lanHub.address,
+          ...(partialSettings as Partial<Settings>).lanHub,
+        },
       }))
     ),
   updateSettings: async (settings: Settings) =>

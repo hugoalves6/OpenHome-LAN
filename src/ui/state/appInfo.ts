@@ -74,6 +74,7 @@ export const defaultSettings: Settings = {
   monDisplayState: initialMonDisplayState(),
   appTheme: 'system',
   zoomLevel: 100,
+  lanHub: { address: 'http://192.168.1.125:8321', password: '' },
 }
 
 export type AppTheme = 'light' | 'dark' | 'system'
@@ -86,6 +87,7 @@ export type Settings = {
   monDisplayState: MonDisplayState
   appTheme: AppTheme
   zoomLevel: number
+  lanHub: { address: string; password: string }
 }
 
 export type AppInfoState = {
@@ -186,7 +188,16 @@ export const appInfoReducer: Reducer<AppInfoState, AppInfoAction> = (
 
       updateStyleForUiScale(payload.zoomLevel)
 
-      return { ...state, settings: { ...payload, enabledSaveTypes: enabled }, settingsLoaded: true }
+      return {
+        ...state,
+        settings: {
+          ...defaultSettings,
+          ...payload,
+          lanHub: { ...defaultSettings.lanHub, ...payload.lanHub },
+          enabledSaveTypes: enabled,
+        },
+        settingsLoaded: true,
+      }
     }
     case 'set_icon_size': {
       return {

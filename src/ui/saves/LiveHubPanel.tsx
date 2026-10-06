@@ -1,14 +1,15 @@
 import { liveHub, remotePathData } from '@openhome-core/lan/liveHub'
 import { R } from '@openhome-core/util/functional'
+import useSettings from '@openhome-ui/hooks/settings'
+import { Link } from 'react-router'
 import { useSaves } from '@openhome-ui/state/saves'
-import { Button, Card, Flex, Text, TextField } from '@radix-ui/themes'
+import { Button, Card, Flex, Text } from '@radix-ui/themes'
 import { useState, useSyncExternalStore } from 'react'
 
 export default function LiveHubPanel() {
   useSyncExternalStore(liveHub.subscribe, liveHub.snapshot)
   const saves = useSaves()
-  const [base, setBase] = useState(() => localStorage.getItem('openhome-lan-hub') || liveHub.base)
-  const [password, setPassword] = useState('')
+  const { settings } = useSettings()
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const action = async (callback: () => Promise<void>) => {
@@ -26,25 +27,12 @@ export default function LiveHubPanel() {
     <Card>
       <Flex direction="column" gap="2">
         <Text weight="bold">LAN console saves</Text>
-        <TextField.Root
-          aria-label="Hub address"
-          value={base}
-          onChange={(event) => setBase(event.target.value)}
-        />
-        <TextField.Root
-          aria-label="Hub password"
-          type="password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          placeholder="Hub password"
-        />
+        <Link to="/settings/lan">LAN hub settings</Link>
         <Button
-          disabled={busy}
+          disabled={busy || !settings.lanHub.password}
           onClick={() =>
             void action(async () => {
-              await liveHub.connect(base, password)
-              localStorage.setItem('openhome-lan-hub', base)
-              setPassword('')
+              await liveHub.connect(settings.lanHub.address, settings.lanHub.password)
             })
           }
         >

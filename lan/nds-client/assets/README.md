@@ -1,5 +1,10 @@
 # Launcher artwork
 
+OpenHome DS v0.4.5 offers a connection choice when Wi-Fi is unavailable
+or after three consecutive hub connection failures: A retries the saved network;
+B continues offline and pauses automatic retries. Press L to reconnect later.
+Offline mode preserves local saves; hub sync and boxes require a connection.
+
 The icon and covers are encoded from the user-supplied `icon-nds.png` artwork.
 These files retain the original design, resized for the launcher formats.
 

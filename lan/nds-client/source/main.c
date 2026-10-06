@@ -14,7 +14,7 @@
 #include "settings_ui.h"
 
 #define MAX_SAVES 8
-#define APP_VERSION "0.4.4"
+#define APP_VERSION "0.4.5"
 typedef struct {
     char title[40], local[256], remote[256];
     char local_sha[65], hub_sha[65], baseline[65], checked[65], status[64];
@@ -27,6 +27,7 @@ static PrintConsole top, bottom;
 enum { PAGE_HOME, PAGE_SAVES, PAGE_BOX_PICK };
 static int page=PAGE_HOME,home_selection;
 static int update_pending, retry_automatic, offline_polls, retry_attempt;
+static int offline_mode, connection_failures;
 static const char *home_items[]={"My saves","Pokemon boxes","Connection settings","App updates","Diagnostics","Exit"};
 static unsigned short icon_font[1024];
 static void draw_wifi(void) {
@@ -50,7 +51,7 @@ static void draw(void) {
     consoleSelect(&top); consoleClear();
     char label[96];
     theme_text(&top,16,8,37,"OPENHOME              DS");
-    snprintf(label,sizeof(label),"Hub  %s",connected?"Connected":"Offline");theme_text(&top,16,96,37,label);
+    snprintf(label,sizeof(label),"Hub  %s",connected?"Connected":offline_mode?"Offline mode":"Offline");theme_text(&top,16,96,37,label);
     snprintf(label,sizeof(label),"%s:%d",hub_host,hub_port);theme_text(&top,16,112,36,label);
     snprintf(label,sizeof(label),"%.28s",message);theme_text(&top,16,136,37,label);
     if(strlen(message)>28)theme_text(&top,16,144,37,message+28);
@@ -227,32 +228,75 @@ static void update_app(int automatic) {
     if(rename("/OpenHomeMini.nds.new","/OpenHomeMini.nds")){rename(backup,"/OpenHomeMini.nds");say("Install failed. Backup retained.");return;}
     update_pending=1;say("Update installed. Restart app.");
 }
+static int connection_choice(int no_wifi) {
+    say(no_wifi?"No Wi-Fi connection available.":"Hub connection failed 3 times.");
+    consoleSelect(&bottom);consoleClear();theme_dialog(1);
+    theme_text(&bottom,16,8,37,"CONNECTION OPTIONS");
+    theme_text(&bottom,16,40,37,no_wifi?"Is your saved Wi-Fi nearby?":"Is Wi-Fi and your hub nearby?");
+    theme_text(&bottom,16,64,36,"Retry the saved network or");
+    theme_text(&bottom,16,80,36,"continue without the hub.");
+    theme_text(&bottom,24,112,33,"A  Retry connection");
+    theme_text(&bottom,24,136,37,"B  Continue offline");
+    theme_text(&bottom,8,176,37,"Touch an option or press A/B");
+    theme_text(&bottom,8,184,36,"Offline: L reconnects later");
+    debug_log("Connection choice shown; failures=%d no_wifi=%d",connection_failures,no_wifi);
+    while(1){
+        swiWaitForVBlank();scanKeys();int keys=keysDown();
+        if(keys&KEY_A)return 1;
+        if(keys&(KEY_B|KEY_START))return 0;
+        if(keys&KEY_TOUCH){touchPosition t;touchRead(&t);
+            if(t.px>=8&&t.px<248){
+                if(t.py>=104&&t.py<128)return 1;
+                if(t.py>=128&&t.py<152)return 0;
+            }
+        }
+    }
+}
+static void connection_failed(int no_wifi) {
+    connected=0;
+    connection_failures++;
+    if(no_wifi||connection_failures>=3){
+        offline_mode=!connection_choice(no_wifi);
+        connection_failures=0;offline_polls=0;retry_attempt=0;
+        debug_log("Connection choice: %s",offline_mode?"offline":"retry");
+        say(offline_mode?"Offline mode. L to reconnect.":"Will retry in 5 seconds.");
+    }
+}
 static void reconnect(void) {
+    if(!retry_automatic){offline_mode=0;offline_polls=0;retry_attempt=0;}
     connected=0;say("Connecting to Wi-Fi...");
-    if(!wifi_started){if(!Wifi_InitDefault(INIT_ONLY)){say("Wi-Fi initialization failed.");return;}wifi_started=1;}
+    if(!wifi_started){if(!Wifi_InitDefault(INIT_ONLY)){say("Wi-Fi initialization failed.");connection_failed(1);return;}wifi_started=1;}
     if(Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED){
         Wifi_AutoConnect();
         int frames=0;
         while(Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED&&frames++<1800){swiWaitForVBlank();scanKeys();if(!(frames%30))draw_wifi();if(keysDown()&KEY_B)break;}
-        if(Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED){say("Wi-Fi unavailable. L to retry.");return;}
+        if(Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED){say("Wi-Fi unavailable. L to retry.");connection_failed(1);return;}
     }
     say("Connecting to your hub...");
-    if(net_login()){say("Login failed. Check card config.");return;}
+    if(net_login()){say("Login failed. Check card config.");connection_failed(Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED);return;}
     connected=1;
     debug_upload_previous(card_id);
     if(!retry_automatic)update_app(1);
     refresh(1);
+    if(connected)connection_failures=0;
+    else connection_failed(Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED);
     if(update_pending)say("Update installed. Restart app.");
 }
 static void poll_hub(void){
-    static const unsigned retry_seconds[]={5,5,5,5,10,10,10,20,20,30};
-    if(connected){offline_polls=0;retry_attempt=0;refresh(0);}
+    static const int retry_seconds[]={5,5,5,5,10,10,10,20,20,30};
+    if(offline_mode)return;
+    if(connected){
+        if(Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED){connection_failed(1);return;}
+        offline_polls=0;retry_attempt=0;refresh(0);
+        if(connected)connection_failures=0;
+        else connection_failed(Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED);
+    }
     else if(++offline_polls*5>=retry_seconds[retry_attempt]){
         offline_polls=0;retry_automatic=1;
         debug_log("Automatic reconnect attempt=%d",retry_attempt+1);
         reconnect();retry_automatic=0;
         if(connected)retry_attempt=0;
-        else if(retry_attempt<9)retry_attempt++;
+        else if(connection_failures&&retry_attempt<9)retry_attempt++;
     }
 }
 

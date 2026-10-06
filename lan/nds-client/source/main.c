@@ -12,9 +12,10 @@
 #include "theme.h"
 #include "debug_log.h"
 #include "settings_ui.h"
+#include "github_update.h"
 
 #define MAX_SAVES 8
-#define APP_VERSION "0.4.5"
+#define APP_VERSION "0.5.0"
 typedef struct {
     char title[40], local[256], remote[256];
     char local_sha[65], hub_sha[65], baseline[65], checked[65], status[64];
@@ -213,14 +214,16 @@ static int refresh(int full) {
 }
 static void update_app(int automatic) {
     if(update_pending){say("Update installed. Restart app.");return;}
-    char info[512],version[40],hash[65],current[65];
-    say("Checking for app update...");
-    if(net_update_info(info,sizeof(info)) || mini_json_string(info,"version",version,sizeof(version)) ||
-       mini_json_string(info,"sha256",hash,sizeof(hash)) || strlen(hash)!=64){say("Update check failed. L to retry.");return;}
-    if(!strcmp(version,APP_VERSION)){if(!automatic)say("App is already up to date.");return;}
+    char info[1024],version[40],hash[65],current[65],url[512];
+    say("Checking GitHub for update...");
+    if(github_update_info(info,sizeof(info))){if(!automatic)say(net_error);else say("GitHub check unavailable.");return;}
+    if(mini_json_string(info,"version",version,sizeof(version)) ||
+       mini_json_string(info,"sha256",hash,sizeof(hash)) || strlen(hash)!=64 ||
+       mini_json_string(info,"url",url,sizeof(url))){say("Invalid GitHub update info.");return;}
+    if(!github_update_newer(version,APP_VERSION)){if(!automatic)say("App is already up to date.");return;}
     if(!confirm("Install app update?"))return;
     say("Downloading update. B cancels.");
-    if(net_download("updates/OpenHomeMini.nds","/OpenHomeMini.nds.new",hash)) {say("Update failed. Old app retained.");return;}
+    if(github_update_download(url,"/OpenHomeMini.nds.new",hash)) {say(net_error);return;}
     if(mini_sha_file("/OpenHomeMini.nds",current)){say("App file missing. Update stopped.");return;}
     char backup[96];snprintf(backup,sizeof(backup),"/OpenHomeMini.nds.backup.%lu",(unsigned long)time(NULL));
     for(unsigned i=0;access(backup,F_OK)==0;i++)snprintf(backup,sizeof(backup),"/OpenHomeMini.nds.backup.%lu-%u",(unsigned long)time(NULL),i);
@@ -272,11 +275,15 @@ static void reconnect(void) {
         while(Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED&&frames++<1800){swiWaitForVBlank();scanKeys();if(!(frames%30))draw_wifi();if(keysDown()&KEY_B)break;}
         if(Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED){say("Wi-Fi unavailable. L to retry.");connection_failed(1);return;}
     }
+    /* Once provisioned, checking GitHub works even with the hub switched off. */
+    if(!retry_automatic&&github_update_ready())update_app(1);
     say("Connecting to your hub...");
     if(net_login()){say("Login failed. Check card config.");connection_failed(Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED);return;}
     connected=1;
+    int had_updater_seed=github_update_ready();
+    github_update_seed(hub_token);
     debug_upload_previous(card_id);
-    if(!retry_automatic)update_app(1);
+    if(!retry_automatic&&!had_updater_seed)update_app(1);
     refresh(1);
     if(connected)connection_failures=0;
     else connection_failed(Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED);
@@ -320,6 +327,7 @@ int main(void) {
     if(!storage_ready||configure()){say("Card config/storage not ready.");while(1){swiWaitForVBlank();scanKeys();if(keysDown()&KEY_START)return 0;}}
     debug_log("Configuration loaded; save_count=%d",count);
     net_set_progress(transfer_progress);
+    github_update_progress(transfer_progress);
     port_init();
     debug_log("Sprite initialization complete");
     reconnect();int frames=0;
@@ -343,7 +351,11 @@ int main(void) {
                     if(settings_open(&top,&bottom,APP_VERSION))reconnect();
                     else draw();
                 }
-                else if(home_selection==3){if(!connected)reconnect();if(connected)update_app(0);draw();}
+                else if(home_selection==3){
+                    if(!wifi_started||Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED)reconnect();
+                    if(wifi_started&&Wifi_AssocStatus()==ASSOCSTATUS_ASSOCIATED)update_app(0);
+                    draw();
+                }
                 else if(home_selection==4){settings_diagnostics(&top,&bottom,APP_VERSION);draw();}
                 else quit=1;
                 frames=0;
@@ -359,7 +371,7 @@ int main(void) {
             if(touch.py>=32&&touch.py<160){int choice=(selected/4)*4+(touch.py-32)/32;if(choice<count){selected=choice;draw();}}
         }
         if(keys&KEY_L){reconnect();frames=0;}
-        if(connected&&(keys&KEY_R)){update_app(0);frames=0;}
+        if((keys&KEY_R)&&wifi_started&&Wifi_AssocStatus()==ASSOCSTATUS_ASSOCIATED){update_app(0);frames=0;}
         if(connected&&((keys&KEY_SELECT)||(page==PAGE_BOX_PICK&&(keys&KEY_A)))){
             Save *s=&saves[selected];
             if(net_listing(listing,sizeof(listing))||hub_hash(s)<0||mini_sha_file(s->local,s->local_sha))say("Cannot check save. L to retry.");

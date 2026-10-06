@@ -7,7 +7,7 @@
 #include <string.h>
 #include <stdint.h>
 
-extern const uint8_t port_icons[650][1024];
+extern const uint8_t *port_icon_get(unsigned species);
 extern const uint16_t port_icon_palette[256];
 static uint16_t *graphics[30];
 static uint16_t *portrait;
@@ -45,7 +45,7 @@ static void render(PrintConsole *top,PrintConsole *bottom){
     hide_portrait();
     if(p[90]==1){
         unsigned species=read16(p);
-        if(species<650&&portrait){debug_log("BOX portrait copy species=%u",species);dmaCopy(port_icons[species],portrait,1024);
+        if(species<650&&portrait){debug_log("BOX portrait copy species=%u",species);dmaCopy(port_icon_get(species),portrait,1024);
             oamSet(&oamMain,0,8,32,0,0,SpriteSize_32x32,SpriteColorFormat_256Color,portrait,0,true,false,false,false,false);}
         iprintf("\x1b[5;11H\x1b[33m%.20s\x1b[0m",p+96);
         iprintf("\x1b[7;11HLv.%u  %s%s",p[2],p[5]==0?"M":p[5]==1?"F":"-",p[4]&1?"  * Shiny":"");
@@ -72,7 +72,7 @@ static void render(PrintConsole *top,PrintConsole *bottom){
         int x=11+(i%6)*40,y=26+(i/6)*26;
         if(mon[90]==1&&species<650&&graphics[i]){
             if(i==cursor)debug_log("BOX selected sprite copy slot=%d species=%u",i,species);
-            dmaCopy(port_icons[species],graphics[i],1024);
+            dmaCopy(port_icon_get(species),graphics[i],1024);
             oamSet(&oamSub,i,x,y,0,0,SpriteSize_32x32,SpriteColorFormat_256Color,graphics[i],-1,false,false,false,false,false);
         }else oamSetHidden(&oamSub,i,true);
         if(mon[90]==2)iprintf("\x1b[%d;%dH!",5+(i/6)*3,3+(i%6)*5);

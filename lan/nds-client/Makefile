@@ -20,9 +20,9 @@ GAME_TITLE := OpenHome DS
 GAME_SUBTITLE1 := LAN save sync
 GAME_SUBTITLE2 := R4i and DSPico
 BUILD		:=	build
-SOURCES := source vendor
+SOURCES := source vendor $(wildcard vendor/bearssl-0.6/src/*)
 DATA		:=	data
-INCLUDES	:=	include
+INCLUDES := include vendor/bearssl-0.6/inc vendor/bearssl-0.6/src
 
 #---------------------------------------------------------------------------------
 # options for code generation
@@ -32,7 +32,7 @@ ARCH	:=	-march=armv5te -mtune=arm946e-s -mthumb
 CFLAGS	:=	-g -Wall -O2 -ffunction-sections -fdata-sections\
 		$(ARCH)
 
-CFLAGS	+=	$(INCLUDE) -DARM9
+CFLAGS += $(INCLUDE) -DARM9 -DBR_USE_URANDOM=0 -DBR_USE_UNIX_TIME=0
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions
 
 ASFLAGS	:=	-g $(ARCH)

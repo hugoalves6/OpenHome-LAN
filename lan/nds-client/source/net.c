@@ -1,5 +1,6 @@
 #include "net.h"
 #include "mini_core.h"
+#include "mini_socket.h"
 #ifdef __NDS__
 #include "debug_log.h"
 #else
@@ -17,16 +18,17 @@
 #include <errno.h>
 #ifdef __NDS__
 #include <nds.h>
+#include <dswifi9.h>
 #include <sys/ioctl.h>
 /* dswifi socket timeouts are not relied upon: poll with an explicit limit. */
 static int socket_io(int sock, void *data, size_t size, int sending) {
     for(int frames=0;frames<900;frames++) {
         int n=sending?send(sock,data,size,0):recv(sock,data,size,0);
-        if(n>=0)return n;
-        if(errno!=EAGAIN && errno!=EWOULDBLOCK && errno!=EINPROGRESS)return -1;
-        swiWaitForVBlank();scanKeys();if(keysHeld()&KEY_B)return -1;
+        if(n>=0){if(!n)debug_log("TCP %s ended before response complete",sending?"send":"receive");return n;}
+        if(errno!=EAGAIN && errno!=EWOULDBLOCK && errno!=EINPROGRESS){debug_log("TCP %s failed errno=%d wifi=%d",sending?"send":"receive",errno,Wifi_AssocStatus());return -1;}
+        swiWaitForVBlank();scanKeys();if(keysHeld()&KEY_B){debug_log("TCP wait cancelled by B");return -1;}
     }
-    return -1;
+    debug_log("TCP %s timed out wifi=%d",sending?"send":"receive",Wifi_AssocStatus());return -1;
 }
 #define SOCKET_SEND(s,p,n) socket_io(s,(void*)(p),n,1)
 #define SOCKET_RECV(s,p,n) socket_io(s,p,n,0)
@@ -36,7 +38,6 @@ static int socket_io(int sock, void *data, size_t size, int sending) {
 #endif
 #ifndef __NDS__
 #include <arpa/inet.h>
-#define closesocket close
 #endif
 
 char hub_host[64] = "192.168.1.125", hub_password[128] = "", hub_token[128] = "";
@@ -54,7 +55,7 @@ static int send_all(int socket, const void *data, size_t size) {
 static int connect_hub(void) {
     unsigned a,b,c,d; char extra;
     if (sscanf(hub_host,"%u.%u.%u.%u%c",&a,&b,&c,&d,&extra)!=4 || a!=192 || b!=168 || c!=1 || d>254 || d==0) return -1;
-    int sock=socket(AF_INET,SOCK_STREAM,0); if (sock<0) return -1;
+    int sock=socket(AF_INET,SOCK_STREAM,0); if (sock<0){debug_log("TCP socket allocation failed errno=%d",errno);return -1;}
     struct sockaddr_in addr; memset(&addr,0,sizeof(addr));
     addr.sin_family=AF_INET; addr.sin_port=htons(hub_port);
     addr.sin_addr.s_addr=inet_addr(hub_host);
@@ -63,9 +64,9 @@ static int connect_hub(void) {
     setsockopt(sock,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof(timeout));
 #ifdef __NDS__
     int nonblocking=1;
-    if(ioctl(sock,FIONBIO,&nonblocking)){closesocket(sock);return -1;}
+    if(ioctl(sock,FIONBIO,&nonblocking)){mini_socket_close(sock);return -1;}
     int result=connect(sock,(struct sockaddr*)&addr,sizeof(addr));
-    if(result && errno!=EINPROGRESS && errno!=EWOULDBLOCK && errno!=EAGAIN){closesocket(sock);return -1;}
+    if(result && errno!=EINPROGRESS && errno!=EWOULDBLOCK && errno!=EAGAIN){debug_log("TCP connect failed errno=%d wifi=%d",errno,Wifi_AssocStatus());mini_socket_close(sock);return -1;}
     if(result){
         int ready=0;
         for(int frames=0;frames<900;frames++){
@@ -73,10 +74,10 @@ static int connect_hub(void) {
             if(!getpeername(sock,(struct sockaddr*)&peer,&size)){ready=1;break;}
             swiWaitForVBlank();scanKeys();if(keysHeld()&KEY_B)break;
         }
-        if(!ready){closesocket(sock);return -1;}
+        if(!ready){debug_log("TCP connect wait ended wifi=%d",Wifi_AssocStatus());mini_socket_close(sock);return -1;}
     }
 #else
-    if (connect(sock,(struct sockaddr*)&addr,sizeof(addr))) { closesocket(sock); return -1; }
+    if (connect(sock,(struct sockaddr*)&addr,sizeof(addr))) { mini_socket_close(sock); return -1; }
 #endif
     return sock;
 }
@@ -95,7 +96,7 @@ static int begin(const char *method,const char *path,size_t size,const char *ext
     int sock=connect_hub(); if (sock<0) return -1;
     char headers[2048];
     int n=snprintf(headers,sizeof(headers),"%s %s HTTP/1.0\r\nHost: %s:%d\r\nX-Auth: %s\r\nContent-Length: %lu\r\nConnection: close\r\n%s\r\n",method,path,hub_host,hub_port,hub_token,(unsigned long)size,extra?extra:"");
-    if (n<0 || n>=(int)sizeof(headers) || send_all(sock,headers,n)) { closesocket(sock); return -1; }
+    if (n<0 || n>=(int)sizeof(headers) || send_all(sock,headers,n)) { mini_socket_close(sock); return -1; }
     return sock;
 }
 static int response(int sock,size_t *length) {
@@ -126,9 +127,9 @@ static int text_request(const char *method,const char *path,const char *body,cha
     int status=response(sock,&length);
     if (status<0 || length>=cap || read_all(sock,out,length)) goto done;
     out[length]=0;
-    if(status!=200){mini_json_string(out,"error",net_error,sizeof(net_error));goto done;}
+    if(status!=200){debug_log("HTTP response status=%d",status);mini_json_string(out,"error",net_error,sizeof(net_error));goto done;}
     last_response_size=length;result=0;
-done: closesocket(sock); return result;
+done: mini_socket_close(sock); return result;
 }
 int net_login(void) {
     char body[256],result[256];
@@ -182,7 +183,7 @@ int net_upload(const char *local,const char *remote,const char *previous,const c
     if(ferror(f)||sent!=size)goto done;
     if(progress_callback)progress_callback("Waiting for hub response",0,0);
     size_t length;if(response(sock,&length)==200)result=0;
-done: if(sock>=0)closesocket(sock);fclose(f);return result;
+done: if(sock>=0)mini_socket_close(sock);fclose(f);return result;
 }
 int net_download(const char *remote,const char *temporary,const char *expected) {
     char encoded[1024],path[1100],hash[65];static char buffer[4096];size_t left;
@@ -199,5 +200,5 @@ int net_download(const char *remote,const char *temporary,const char *expected) 
     if(fflush(f))goto done;
     if(fclose(f)){f=NULL;goto done;}f=NULL;
     if(!mini_sha_file(temporary,hash)&&!strcmp(hash,expected))result=0;
-done: if(f)fclose(f);closesocket(sock);return result;
+done: if(f)fclose(f);mini_socket_close(sock);return result;
 }

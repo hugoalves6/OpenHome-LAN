@@ -2,6 +2,7 @@
 #include "github_update.h"
 #include "mini_core.h"
 #include "net.h"
+#include "mini_socket.h"
 #include "bearssl.h"
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -20,7 +21,6 @@
 #include "debug_log.h"
 #else
 #include <arpa/inet.h>
-#define closesocket close
 #define debug_log(...) ((void)0)
 #endif
 
@@ -215,7 +215,7 @@ static int get(const char *url,char *text,size_t capacity,const char *filename){
             /* Never downgrade or forward headers/credentials to arbitrary hosts. */
             if(strlen(location)>=sizeof(current))break;
             strcpy(current,location);
-            closesocket(sock);sock=-1;continue;
+            mini_socket_close(sock);sock=-1;continue;
         }
         if(status!=200){snprintf(net_error,sizeof(net_error),"GitHub returned HTTP %d.",status);break;}
         if(chunked&&have_length)break;
@@ -253,7 +253,7 @@ static int get(const char *url,char *text,size_t capacity,const char *filename){
         break;
     }
     if(file)fclose(file);
-    if(sock>=0)closesocket(sock);
+    if(sock>=0)mini_socket_close(sock);
     if(result){
         if(filename)remove(filename);
         debug_log("GitHub update failed TLS=%d transport=%d",br_ssl_engine_last_error(&client.eng),transport_failed);

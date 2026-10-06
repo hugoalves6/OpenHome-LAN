@@ -1,4 +1,10 @@
-# Direct GitHub app updates (v0.5.1)
+# Direct GitHub app updates (v0.5.2)
+
+v0.5.2 fixes DS socket exhaustion during repeated hub polling. Both transports
+now use `mini_socket_close`: request TCP shutdown, wait up to 30 frames for a
+graceful close, then release the request's owned sgIP record. It never calls
+ordinary closesocket before forced release, avoiding handle-reuse races. Only
+application-owned request sockets are touched; Wi-Fi/DHCP sockets are left alone.
 
 The DS app itself fetches this fixed, public manifest over HTTPS:
 `https://raw.githubusercontent.com/hugoalves6/OpenHome-LAN/lan-live-dsi/lan/nds-client/update.json`.

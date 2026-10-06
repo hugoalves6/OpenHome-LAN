@@ -15,7 +15,7 @@
 #include "github_update.h"
 
 #define MAX_SAVES 8
-#define APP_VERSION "0.5.1"
+#define APP_VERSION "0.5.2"
 typedef struct {
     char title[40], local[256], remote[256];
     char local_sha[65], hub_sha[65], baseline[65], checked[65], status[64];
@@ -333,7 +333,7 @@ static void reconnect(void) {
     /* Once provisioned, checking GitHub works even with the hub switched off. */
     if(!retry_automatic&&github_update_ready())check_app_update(1);
     say("Connecting to your hub...");
-    if(net_login()){say("Login failed. Check card config.");connection_failed(Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED);return;}
+    if(net_login()){debug_log("Hub login failed: %s",net_error);say("Hub login failed. L to retry.");connection_failed(Wifi_AssocStatus()!=ASSOCSTATUS_ASSOCIATED);return;}
     connected=1;
     int had_updater_seed=github_update_ready();
     github_update_seed(hub_token);

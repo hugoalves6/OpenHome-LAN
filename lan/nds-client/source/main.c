@@ -15,7 +15,7 @@
 #include "github_update.h"
 
 #define MAX_SAVES 8
-#define APP_VERSION "0.5.2"
+#define APP_VERSION "0.6.0"
 typedef struct {
     char title[40], local[256], remote[256];
     char local_sha[65], hub_sha[65], baseline[65], checked[65], status[64];
@@ -446,7 +446,12 @@ int main(void) {
             Save *s=&saves[selected];
             if(net_listing(listing,sizeof(listing))||hub_hash(s)<0||mini_sha_file(s->local,s->local_sha))say("Cannot check save. L to retry.");
             else if(strcmp(s->hub_sha,s->local_sha))say("Sync this save with A before boxes.");
-            else {port_browser(&top,&bottom,s->remote);refresh(1);draw();}
+            else {live_pulse(1);int saved=port_browser(&top,&bottom,s->remote);
+                if(saved){
+                    if(net_listing(listing,sizeof(listing))||sync_save(s,0)||strcmp(s->local_sha,s->hub_sha))say("Saved on hub. Card sync pending. A retries.");
+                    else say("All changes saved to hub and card.");
+                }
+                refresh(1);live_pulse(0);draw();}
             frames=0;
         }
         if(page==PAGE_SAVES&&connected&&(keys&(KEY_A|KEY_X|KEY_Y))){

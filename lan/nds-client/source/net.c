@@ -119,12 +119,14 @@ static int read_all(int sock,void *buffer,size_t size) {
     while (size) { int n=SOCKET_RECV(sock,p,size); if(n<=0)return -1; p+=n; size-=n; }
     return 0;
 }
+int net_last_status;
 static int text_request(const char *method,const char *path,const char *body,char *out,size_t cap) {
+    net_last_status=0;
     snprintf(net_error,sizeof(net_error),"Network wait failed. B cancels.");
     int sock=begin(method,path,body?strlen(body):0,NULL); if(sock<0)return -1;
     int result=-1; size_t length;
     if (body && send_all(sock,body,strlen(body))) goto done;
-    int status=response(sock,&length);
+    int status=response(sock,&length);net_last_status=status;
     if (status<0 || length>=cap || read_all(sock,out,length)) goto done;
     out[length]=0;
     if(status!=200){debug_log("HTTP response status=%d",status);mini_json_string(out,"error",net_error,sizeof(net_error));goto done;}
@@ -163,6 +165,18 @@ int net_swap(const char *remote,const char *sha,int sb,int ss,int tb,int ts) {
     /* Configuration already restricts paths; avoid JSON string escapes here. */
     if(strchr(remote,'"')||strchr(remote,'\\'))return -1;
     snprintf(body,sizeof(body),"{\"path\":\"%s\",\"sha256\":\"%s\",\"source_box\":%d,\"source_slot\":%d,\"target_box\":%d,\"target_slot\":%d}",remote,sha,sb,ss,tb,ts);
+    return text_request("POST","/ohnx/nds/swap",body,result,sizeof(result));
+}
+int net_save_moves(const char *remote,const char *sha,const DraftMove *moves,int count) {
+    static char body[4096];char result[256];
+    if(count<1||count>DRAFT_MAX_MOVES||strchr(remote,'"')||strchr(remote,'\\'))return -1;
+    int used=snprintf(body,sizeof(body),"{\"path\":\"%s\",\"sha256\":\"%s\",\"moves\":[",remote,sha);
+    for(int i=0;i<count;i++) {
+        if(used<0 || used>=(int)sizeof(body)-64)return -1;
+        used+=snprintf(body+used,sizeof(body)-used,"%s[%u,%u,%u,%u]",i?",":"",moves[i].source_box,moves[i].source_slot,moves[i].target_box,moves[i].target_slot);
+    }
+    if(used<0 || used>=(int)sizeof(body)-3)return -1;
+    snprintf(body+used,sizeof(body)-used,"]}");
     return text_request("POST","/ohnx/nds/swap",body,result,sizeof(result));
 }
 int net_upload(const char *local,const char *remote,const char *previous,const char *hash) {

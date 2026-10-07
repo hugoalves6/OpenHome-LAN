@@ -1,11 +1,14 @@
 #ifndef MINI_NET_H
 #define MINI_NET_H
 #include <stdio.h>
+#include "port_draft.h"
 #include <stddef.h>
 extern char hub_host[64], hub_password[128], hub_token[128];
 extern int hub_port;
+extern int net_last_status;
 extern char net_error[96];
 int net_box(const char *remote, int box, char *out, size_t capacity);
+int net_save_moves(const char *remote, const char *sha, const DraftMove *moves, int count);
 int net_swap(const char *remote, const char *sha, int source_box, int source_slot, int target_box, int target_slot);
 void net_set_progress(void (*callback)(const char *, size_t, size_t));
 int net_login(void);

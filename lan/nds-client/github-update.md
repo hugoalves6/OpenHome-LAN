@@ -1,6 +1,6 @@
-# Direct GitHub app updates (v0.5.2)
+# Direct GitHub app updates (v0.6.0)
 
-v0.5.2 fixes DS socket exhaustion during repeated hub polling. Both transports
+v0.5.2 fixed DS socket exhaustion during repeated hub polling. Both transports
 now use `mini_socket_close`: request TCP shutdown, wait up to 30 frames for a
 graceful close, then release the request's owned sgIP record. It never calls
 ordinary closesocket before forced release, avoiding handle-reuse races. Only
@@ -64,6 +64,11 @@ decoded into a shared aligned buffer immediately before its DMA copy.
 5. Keep earlier release assets intact for rollback/manual recovery.
 
 The Pi's old update endpoint serves the current bootstrap for consoles migrating from v0.4.x.
+
+v0.6.0 stages box rearrangements in RAM. SELECT submits the complete move journal
+as one checksum-guarded hub operation; leaving Boxes offers Save, Discard, or Keep
+editing. The hub applies every move in memory before its atomic replacement and
+stores a request receipt so retrying after a lost response cannot apply moves twice.
 Future releases are fetched directly by the native app; no Pi update poller runs.
 
 Host tests exercise the actual TLS client against public GitHub releases,

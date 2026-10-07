@@ -1,4 +1,5 @@
 #include "port_ui.h"
+#include "port_draft.h"
 #include "net.h"
 #include "theme.h"
 #include "debug_log.h"
@@ -11,9 +12,12 @@ extern const uint8_t *port_icon_get(unsigned species);
 extern const uint16_t port_icon_palette[256];
 static uint16_t *graphics[30];
 static uint16_t *portrait;
-static unsigned char view[7809];
+static unsigned char *view;
+static const char *draft_remote;
+static int fetch_box(int box,char *out,size_t cap){return net_box(draft_remote,box,out,cap);}
 static int cursor, box_index, picked_box, picked_slot, stats_page;
 static char picked_sha[65],status_text[96];
+static int save_uncertain;
 static const char *natures[25]={"Hardy","Lonely","Brave","Adamant","Naughty","Bold","Docile","Relaxed","Impish","Lax","Timid","Hasty","Serious","Jolly","Naive","Modest","Mild","Quiet","Bashful","Rash","Calm","Gentle","Sassy","Careful","Quirky"};
 static unsigned read16(const unsigned char *p){return p[0]|(p[1]<<8);}
 static void hash_hex(char out[65]) {for(int i=0;i<32;i++)sprintf(out+2*i,"%02x",view[8+i]);out[64]=0;}
@@ -66,7 +70,7 @@ static void render(PrintConsole *top,PrintConsole *bottom){
     consoleSelect(bottom);consoleClear();
     debug_log("BOX text ready; drawing grid sprites");
     iprintf("\x1b[2;2H<  BOX %02d/%02u       SLOT %02d  >",box_index+1,view[5],cursor+1);
-    iprintf("\x1b[22;2HA %s  X Cancel  Y Details\x1b[24;2HL/R Box  Touch Select  B Back",picked_slot>=0?"Place":"Pick ");
+    iprintf("\x1b[22;2HA %s  X Cancel  Y Details\x1b[24;2HL/R Box  SELECT Save  B Back",picked_slot>=0?"Place":"Pick ");
     for(int i=0;i<30;i++){
         unsigned char *mon=view+128+i*256;unsigned species=read16(mon);
         int x=11+(i%6)*40,y=26+(i/6)*26;
@@ -86,7 +90,9 @@ static int load(const char *remote,PrintConsole *top){
     hide_icons();consoleSelect(top);consoleClear();
     theme_dialog(0);
     iprintf("\x1b[2;3HOPENHOME\x1b[7;3HLoading box %d...\x1b[11;3HB cancels a network wait.",box_index+1);
-    if(net_box(remote,box_index,(char*)view,sizeof(view)))return -1;
+    (void)remote;
+    view=draft_box(box_index,fetch_box);
+    if(!view){snprintf(net_error,sizeof(net_error),"Box unavailable or hub changed. Draft kept.");return -1;}
     debug_log("BOX response validated");
     return 0;
 }
@@ -94,17 +100,38 @@ static int confirm_move(PrintConsole *top){
     consoleSelect(top);consoleClear();
     hide_icons();theme_dialog(0);
     unsigned char *p=view+128+cursor*256;
-    iprintf("\x1b[2;3HCONFIRM %s\x1b[7;3HFrom: box %d slot %d\x1b[10;3HTo: box %d slot %d\x1b[14;3HOld save backup will be kept.\x1b[23;3HA Confirm            B Cancel",p[90]==1?"SWAP":"MOVE",picked_box+1,picked_slot+1,box_index+1,cursor+1);
+    iprintf("\x1b[2;3HCONFIRM %s\x1b[7;3HFrom: box %d slot %d\x1b[10;3HTo: box %d slot %d\x1b[14;3HPending until you choose Save.\x1b[23;3HA Confirm            B Cancel",p[90]==1?"SWAP":"MOVE",picked_box+1,picked_slot+1,box_index+1,cursor+1);
     while(1){swiWaitForVBlank();scanKeys();int keys=keysDown();if(keys&KEY_A)return 1;if(keys&(KEY_B|KEY_START))return 0;}
 }
-void port_browser(PrintConsole *top,PrintConsole *bottom,const char *remote){
+static int close_choice(PrintConsole *top){
+    hide_icons();consoleSelect(top);consoleClear();theme_dialog(0);
+    iprintf("\x1b[2;3HUNSAVED CHANGES\x1b[7;3H%d pending box moves.\x1b[10;3HA Save and sync to card\x1b[13;3HX Discard this session\x1b[16;3HB Keep editing",draft_count());
+    if(save_uncertain)iprintf("\x1b[13;3HResult unknown: retry Save. ");
+    while(1){swiWaitForVBlank();scanKeys();int k=keysDown();if(k&KEY_A)return 1;if((k&KEY_X)&&!save_uncertain)return 2;if(k&(KEY_B|KEY_START))return 0;}
+}
+int port_browser(PrintConsole *top,PrintConsole *bottom,const char *remote){
+    draft_reset();draft_remote=remote;save_uncertain=0;
     cursor=box_index=stats_page=0;picked_slot=-1;
-    snprintf(status_text,sizeof(status_text),"Browsing hub save.");
+    snprintf(status_text,sizeof(status_text),"Edits pending until SELECT Save.");
     if(load(remote,top))goto error;
     render(top,bottom);
     while(1){
         swiWaitForVBlank();scanKeys();int keys=keysDown();int changed=0;
-        if(keys&(KEY_B|KEY_START))break;
+        if(keys&(KEY_B|KEY_START|KEY_SELECT)){
+            if(!draft_count()){if(keys&(KEY_B|KEY_START))break;}
+            else {
+                int choice=(keys&KEY_SELECT)?1:close_choice(top);
+                if(choice==2){draft_reset();break;}
+                if(choice==1){
+                    char sha[65];draft_sha(sha);hide_icons();consoleSelect(top);consoleClear();theme_dialog(0);
+                    iprintf("\x1b[7;3HSaving all pending moves...\x1b[11;3HThen syncing to the card.");
+                    if(!net_save_moves(remote,sha,draft_moves(),draft_count())){draft_reset();hide_icons();return 1;}
+                    save_uncertain=net_last_status<400||net_last_status>=500;
+                    snprintf(status_text,sizeof(status_text),"Save failed: %.81s",net_error);
+                }
+                render(top,bottom);continue;
+            }
+        }
         if(keys&KEY_LEFT){cursor=(cursor+29)%30;changed=1;}
         if(keys&KEY_RIGHT){cursor=(cursor+1)%30;changed=1;}
         if(keys&KEY_UP){cursor=(cursor+24)%30;changed=1;}
@@ -118,8 +145,8 @@ void port_browser(PrintConsole *top,PrintConsole *bottom,const char *remote){
             }
         }
         if(keys&(KEY_L|KEY_R)){
-            box_index=(box_index+((keys&KEY_R)?1:view[5]-1))%view[5];
-            if(load(remote,top))goto error;
+            int old_box=box_index;box_index=(box_index+((keys&KEY_R)?1:view[5]-1))%view[5];
+            if(load(remote,top)){box_index=old_box;view=draft_box(box_index,fetch_box);snprintf(status_text,sizeof(status_text),"%.95s",net_error);}
             changed=1;
         }
         if(keys&KEY_X){picked_slot=-1;snprintf(status_text,sizeof(status_text),"Move cancelled.");changed=1;}
@@ -132,23 +159,22 @@ void port_browser(PrintConsole *top,PrintConsole *bottom,const char *remote){
             else if(confirm_move(top)){
                 char current[65];hash_hex(current);
                 if(strcmp(current,picked_sha)){snprintf(status_text,sizeof(status_text),"Save changed. Pick the Pokemon again.");picked_slot=-1;}
-                else if(net_swap(remote,picked_sha,picked_box,picked_slot,box_index,cursor)){
-                    snprintf(status_text,sizeof(status_text),"%.95s",net_error);picked_slot=-1;
-                    if(load(remote,top))goto error;
+                else if(draft_swap(picked_box,picked_slot,box_index,cursor)){
+                    snprintf(status_text,sizeof(status_text),"Cannot move. Save first or check slot.");picked_slot=-1;
                 }else{
                     picked_slot=-1;
-                    snprintf(status_text,sizeof(status_text),"Moved. B returns and syncs card.");
-                    if(load(remote,top))goto error;
+                    snprintf(status_text,sizeof(status_text),"%d moves pending. SELECT saves.",draft_count());
                 }
             }
             changed=1;
         }
         if(changed)render(top,bottom);
     }
-    hide_icons();return;
+    draft_reset();hide_icons();return 0;
 error:
     hide_icons();consoleSelect(top);consoleClear();consoleSelect(bottom);consoleClear();
     theme_dialog(0);theme_dialog(1);
     iprintf("\x1b[2;3HOPENHOME\x1b[7;3H%.28s\x1b[9;3H%.28s\x1b[11;3H%.28s\x1b[23;3HB Return to saves",net_error,strlen(net_error)>28?net_error+28:"",strlen(net_error)>56?net_error+56:"");
     while(1){swiWaitForVBlank();scanKeys();if(keysDown()&(KEY_B|KEY_START))break;}
+    draft_reset();return 0;
 }

@@ -1,4 +1,4 @@
-# Direct GitHub app updates (v0.6.0)
+# Direct GitHub app updates (v0.6.1)
 
 v0.5.2 fixed DS socket exhaustion during repeated hub polling. Both transports
 now use `mini_socket_close`: request TCP shutdown, wait up to 30 frames for a
@@ -65,7 +65,7 @@ decoded into a shared aligned buffer immediately before its DMA copy.
 
 The Pi's old update endpoint serves the current bootstrap for consoles migrating from v0.4.x.
 
-v0.6.0 stages box rearrangements in RAM. SELECT submits the complete move journal
+v0.6.1 stages box rearrangements in RAM. SELECT submits the complete move journal
 as one checksum-guarded hub operation; leaving Boxes offers Save, Discard, or Keep
 editing. The hub applies every move in memory before its atomic replacement and
 stores a request receipt so retrying after a lost response cannot apply moves twice.

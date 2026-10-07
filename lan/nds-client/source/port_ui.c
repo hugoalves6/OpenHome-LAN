@@ -132,6 +132,10 @@ int port_browser(PrintConsole *top,PrintConsole *bottom,const char *remote){
                 render(top,bottom);continue;
             }
         }
+        if(save_uncertain){
+            snprintf(status_text,sizeof(status_text),"Result unknown. SELECT retries Save.");
+            render(top,bottom);continue;
+        }
         if(keys&KEY_LEFT){cursor=(cursor+29)%30;changed=1;}
         if(keys&KEY_RIGHT){cursor=(cursor+1)%30;changed=1;}
         if(keys&KEY_UP){cursor=(cursor+24)%30;changed=1;}

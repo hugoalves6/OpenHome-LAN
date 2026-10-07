@@ -15,7 +15,7 @@
 #include "github_update.h"
 
 #define MAX_SAVES 8
-#define APP_VERSION "0.6.0"
+#define APP_VERSION "0.6.1"
 typedef struct {
     char title[40], local[256], remote[256];
     char local_sha[65], hub_sha[65], baseline[65], checked[65], status[64];

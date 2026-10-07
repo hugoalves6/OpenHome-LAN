@@ -35,11 +35,11 @@ impl StoredBankData {
         }
     }
 
-    fn reset_box_indices(&mut self) {
+    pub fn reset_box_indices(&mut self) {
         self.banks.iter_mut().for_each(Bank::reset_box_indices);
     }
 
-    fn order_boxes_by_indices(&mut self) {
+    pub fn order_boxes_by_indices(&mut self) {
         self.banks.iter_mut().for_each(Bank::order_boxes_by_indices);
     }
 

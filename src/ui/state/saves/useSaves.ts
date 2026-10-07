@@ -32,6 +32,10 @@ import {
 import { useMonLocationsInternal } from './useMonLocationsInternal'
 
 export type SavesAndBanksManager = Required<Omit<OpenSavesState, 'error' | 'homeData'>> & {
+  saveAllChanges: () => Promise<void>
+  requestDiscard: () => void
+  hasUnsavedChanges: boolean
+  saving: boolean
   allOpenSaves: readonly SAV[]
 
   importMonsToLocation(mons: PKMInterface[], startingAt: MonLocation): Promise<OpenSavesState>
@@ -334,10 +338,8 @@ export function useSaves(): SavesAndBanksManager {
     }
   }
 
-  const removeSave = (save: SAV) => {
-    if (isRemoteSave(save.filePath.raw)) void liveHub.close(save.filePath.raw)
-    openSavesDispatch({ type: 'remove_save', payload: save })
-  }
+  const session = useContext(SavesContext)
+  const removeSave = session.requestCloseSave
 
   const setMonHeldItem = async (
     item: Item | undefined,
@@ -469,6 +471,10 @@ export function useSaves(): SavesAndBanksManager {
     addSave,
     buildAndOpenSave,
     removeSave,
+    saveAllChanges: session.saveAllChanges,
+    requestDiscard: session.requestDiscard,
+    hasUnsavedChanges: session.hasUnsavedChanges,
+    saving: session.saving,
     saveBoxNavigateLeft,
     saveBoxNavigateRight,
     saveFromIdentifier,

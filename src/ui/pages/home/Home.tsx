@@ -72,6 +72,22 @@ const Home = () => {
         {range(savesAndBanks.allOpenSaves.length).map((i) => (
           <OpenSaveDisplay key={`save_display_${i}`} saveIndex={i} />
         ))}
+        <Flex gap="2" direction="column">
+          <Button
+            disabled={!savesAndBanks.hasUnsavedChanges || savesAndBanks.saving}
+            onClick={() => void savesAndBanks.saveAllChanges()}
+          >
+            Save all changes
+          </Button>
+          <Button
+            variant="soft"
+            disabled={!savesAndBanks.hasUnsavedChanges || savesAndBanks.saving}
+            onClick={savesAndBanks.requestDiscard}
+          >
+            Discard changes
+          </Button>
+          {savesAndBanks.hasUnsavedChanges && <span>Unsaved changes</span>}
+        </Flex>
         <LiveHubPanel />
         <Button onClick={() => setOpenSaveDialog(true)}>
           <MdFileOpen />

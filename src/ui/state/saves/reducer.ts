@@ -227,6 +227,11 @@ type SavesContextValue = {
   openSavesState: OpenSavesState
   openSavesDispatch: Dispatch<OpenSavesAction>
   allOpenSaves: SAV[]
+  requestCloseSave: (save: SAV) => void
+  saveAllChanges: () => Promise<void>
+  requestDiscard: () => void
+  hasUnsavedChanges: boolean
+  saving: boolean
   promptDisambiguation: (possibleSaveTypes: SAVClass<SAV>[]) => Promise<Option<SAVClass<SAV>>>
 }
 
@@ -240,5 +245,10 @@ export const SavesContext = createContext<SavesContextValue>({
   openSavesState: initialState,
   openSavesDispatch: () => {},
   allOpenSaves: [],
+  requestCloseSave: () => {},
+  saveAllChanges: async () => {},
+  requestDiscard: () => {},
+  hasUnsavedChanges: false,
+  saving: false,
   promptDisambiguation: async () => undefined,
 })

@@ -203,3 +203,14 @@ class Save:
         if result.record(source_box,source_slot)!=target or result.record(target_box,target_slot)!=source:
             raise ValueError('Post-edit verification failed')
         return bytes(data)
+
+
+def apply_moves(data, moves):
+    """Validate and apply a complete draft in memory before any file is replaced."""
+    if not isinstance(moves, list) or not 1 <= len(moves) <= 128:
+        raise ValueError('Expected 1 to 128 pending moves')
+    for move in moves:
+        if not isinstance(move, list) or len(move) != 4 or any(type(n) is not int for n in move):
+            raise ValueError('Invalid pending move')
+        data = Save(data).swap(*move)
+    return data

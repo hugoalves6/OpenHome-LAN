@@ -5,6 +5,7 @@ const path = 'roms/nds/disposable.sav'
 const virtual = remotePathData(path).raw
 const bytes = new Uint8Array(524288)
 const encoded = Buffer.from(bytes).toString('base64')
+const editedSha = '07854d2fef297a06ba81685e660c332de36d5d18d546927d30daad6d7fda1541'
 const status = (online = true, pending = false, sha256 = 'old') => ({
   saves: [{ path, online, synced: !pending, pending, busy: true, sha256 }],
 })
@@ -46,10 +47,10 @@ describe('online-only console editing', () => {
     let acknowledged = false
     const transport = vi.fn(async (route: string) => {
       if (route.endsWith('acquire')) return { lease: 'lease', sha256: 'old', bytes: encoded }
-      if (route.endsWith('commit')) return { sha256: 'new', delivered: false }
+      if (route.endsWith('commit')) return { sha256: editedSha, delivered: false }
       if (route.endsWith('status')) {
         acknowledged = true
-        return status(true, false, 'new')
+        return status(true, false, editedSha)
       }
       return { ok: true }
     })
@@ -69,6 +70,28 @@ describe('online-only console editing', () => {
     await hub.load(virtual)
     await expect(hub.write(virtual, bytes)).rejects.toThrow('Disconnected')
     await expect(hub.write(virtual, bytes)).rejects.toThrow('uncertain')
+    expect(transport.mock.calls.filter(([route]) => route.endsWith('commit'))).toHaveLength(1)
+  })
+  it('recovers a committed response that was lost without allowing discard', async () => {
+    let committed = false
+    const attempted = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)))
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('')
+    const transport = vi.fn(async (route: string) => {
+      if (route.endsWith('acquire')) return { lease: 'lease', sha256: 'old', bytes: encoded }
+      if (route.endsWith('commit')) {
+        committed = true
+        throw new Error('Response lost after commit')
+      }
+      if (route.endsWith('status')) return status(true, committed, committed ? attempted : 'old')
+      return { ok: true }
+    })
+    const hub = new LiveHub(transport)
+    await hub.load(virtual)
+    await expect(hub.write(virtual, bytes)).rejects.toThrow('Response lost')
+    expect(hub.hasUnresolvedWrite()).toBe(true)
+    await hub.poll()
+    expect(hub.hasUnresolvedWrite()).toBe(true)
     expect(transport.mock.calls.filter(([route]) => route.endsWith('commit'))).toHaveLength(1)
   })
 })

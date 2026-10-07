@@ -121,10 +121,19 @@ class Hub(upstream.Hub):
                     return self._send_json({'error': 'Save locked by Windows edit or pending delivery'}, 423)
                 old = Path(path).read_bytes()
                 previous = hashlib.sha256(old).hexdigest()
+                journal = Path(self.root) / '.nds-batch-results.json'
+                receipts = upstream.json.loads(journal.read_text()) if journal.exists() else {}
+                request_hash = hashlib.sha256(raw).hexdigest()
+                receipt = receipts.get(rel, {})
+                if 'moves' in request and receipt.get('request') == request_hash and receipt.get('sha256') == previous:
+                    return self._send_json({'sha256': previous})
                 if request.get('sha256') != previous:
                     return self._send_json({'error': 'Save changed; reopen boxes before moving'}, 409)
-                data = nds_boxes.Save(old).swap(request.get('source_box'), request.get('source_slot'),
-                                               request.get('target_box'), request.get('target_slot'))
+                if 'moves' in request:
+                    data = nds_boxes.apply_moves(old, request['moves'])
+                else:
+                    data = nds_boxes.Save(old).swap(request.get('source_box'), request.get('source_slot'),
+                                                   request.get('target_box'), request.get('target_slot'))
                 parent = os.path.dirname(path)
                 if shutil.disk_usage(parent).free < len(data) + 256*1024*1024:
                     raise ValueError('Insufficient backup storage')
@@ -139,6 +148,13 @@ class Hub(upstream.Hub):
                     with os.fdopen(fd, 'wb') as stream:
                         stream.write(data); stream.flush(); os.fsync(stream.fileno())
                     if Path(temporary).read_bytes() != data: raise ValueError('Write verification failed')
+                    if 'moves' in request:
+                        receipts[rel] = {'request': request_hash, 'sha256': hashlib.sha256(data).hexdigest()}
+                        receipt_tmp = journal.with_suffix('.new')
+                        with receipt_tmp.open('w') as stream:
+                            upstream.json.dump(receipts, stream)
+                            stream.flush(); os.fsync(stream.fileno())
+                        os.replace(receipt_tmp, journal)
                     os.replace(temporary, path)
                 finally:
                     if os.path.exists(temporary): os.unlink(temporary)

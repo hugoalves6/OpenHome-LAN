@@ -17,6 +17,8 @@ type Entry = {
   locked: string
   pending?: string
   uncertain?: boolean
+  attempted?: string
+  committed?: boolean
 }
 type Transport = (route: string, body?: unknown) => Promise<unknown>
 export const isRemoteSave = (path: string) => path.startsWith('openhome://')
@@ -82,8 +84,19 @@ export class LiveHub {
       const status = await this.request<{ saves: RemoteSaveStatus[] }>('/ohnx/live/status')
       this.saves = status.saves
       for (const [path, entry] of this.entries) {
-        if (entry.uncertain) continue
         const row = this.saves.find((save) => save.path === path)
+        if (entry.uncertain) {
+          const attempted = entry.attempted
+          if (attempted && row?.sha256 === attempted) {
+            entry.sha256 = attempted
+            entry.pending = attempted
+            entry.committed = true
+            entry.uncertain = false
+          } else if (row?.online && row.sha256 === entry.sha256 && !row.pending) {
+            entry.uncertain = false
+            entry.attempted = undefined
+          } else continue
+        }
         if (entry.pending) {
           if (row?.online && row.synced && !row.pending && row.sha256 === entry.pending)
             entry.pending = undefined
@@ -142,10 +155,20 @@ export class LiveHub {
     this.notify()
     return bytes.slice()
   }
+  hasUnresolvedWrite() {
+    return [...this.entries.values()].some(
+      (entry) => !!entry.pending || !!entry.uncertain || !!entry.committed
+    )
+  }
+  markWritesComplete() {
+    for (const entry of this.entries.values()) entry.committed = false
+  }
   async preflight(paths: string[]) {
     for (const path of paths.filter(isRemoteSave)) {
-      this.assertEditable(path)
       const entry = this.entries.get(remotePath(path))
+      if (entry?.uncertain) await this.poll()
+      if (entry?.pending) await this.write(path, entry.bytes)
+      this.assertEditable(path)
       if (!entry) throw new Error('Remote save not open')
       await this.request('/ohnx/live/renew', { path: remotePath(path), lease: entry.lease })
     }
@@ -157,6 +180,11 @@ export class LiveHub {
     // After a transport timeout the hub may already have committed. Poll/reopen rather than retrying blindly.
     if (!entry.pending) {
       this.assertEditable(path)
+      const digest = await crypto.subtle.digest('SHA-256', bytes.slice())
+      entry.attempted = Array.from(new Uint8Array(digest), (byte) =>
+        byte.toString(16).padStart(2, '0')
+      ).join('')
+      entry.bytes = bytes.slice()
       entry.locked = 'Sending edited save…'
       this.notify()
       try {
@@ -169,8 +197,11 @@ export class LiveHub {
             bytes: base64(bytes),
           }
         )
+        if (result.sha256 !== entry.attempted)
+          throw new Error('Hub returned an unexpected edited-save checksum')
+        entry.committed = result.sha256 !== entry.sha256
         entry.sha256 = result.sha256
-        entry.bytes = bytes.slice()
+        entry.attempted = undefined
         if (result.delivered) {
           entry.locked = ''
           this.notify()

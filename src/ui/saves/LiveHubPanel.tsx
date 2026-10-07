@@ -76,7 +76,8 @@ export default function LiveHubPanel() {
           )
         })}
         <Text size="1">
-          Remote edits save automatically. Wait for card confirmation before leaving the DSi app.
+          Edits stay pending until you choose Save all changes. Keep the DSi app open until card
+          delivery is confirmed.
         </Text>
         {error && (
           <Text color="red" size="1">

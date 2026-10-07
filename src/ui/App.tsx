@@ -21,7 +21,6 @@ import { Flex, Text, Theme } from '@radix-ui/themes'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useCallback, useEffect, useEffectEvent, useReducer, useState } from 'react'
 import BanksAndBoxesProvider from './state-zustand/banks-and-boxes/Provider'
-import { useBanksAndBoxes } from './state-zustand/banks-and-boxes/store'
 import ConvertStrategiesProvider from './state/convert-strategies/ConvertStrategiesProvider'
 import {
   defaultMultiSelectState,
@@ -71,7 +70,6 @@ function AppWithBackend() {
     useState<MultiSelectState>(defaultMultiSelectState())
   const [appInfoState, appInfoDispatch] = useReducer(appInfoReducer, appInfoInitialState)
   const [settingsLoading, setSettingsLoading] = useState(false)
-  const { saveChanges } = useBanksAndBoxes()
   const [bagState, bagDispatch] = useReducer(itemBagReducer, {
     itemCounts: {},
     modified: false,
@@ -84,23 +82,6 @@ function AppWithBackend() {
   const reloadSettings = useEffectEvent(backend.getSettings)
   const getPlatform = useEffectEvent(backend.getPlatform)
   const displayErrorEvent = useEffectEvent(displayError)
-
-  // The save listener works if these are separated into effect events, but not
-  // if the whole effect function is (including the returned callback). Check
-  // that saving still persists movements after any updates to this.
-  const onMenuEvent = useEffectEvent(backend.onMenuEvent)
-
-  const saveChangesEvent = useEffectEvent(saveChanges)
-
-  useEffect(() => {
-    const stopListening = onMenuEvent('save', saveChangesEvent)
-
-    // the "stop listening" function should be called when the effect returns,
-    // otherwise duplicate listeners will exist
-    return () => {
-      stopListening()
-    }
-  }, [])
 
   // only on app start
   useEffect(() => {

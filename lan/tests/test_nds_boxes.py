@@ -30,7 +30,7 @@ def encrypt(clear):
 
 def fixture_mon(generation):
     name='hgss_box0_slot0.pk4' if generation==4 else 'bw_box0_slot0_tepig.pk5'
-    record=(ROOT/'tests/fixtures'/name).read_bytes()
+    record=(ROOT/'OpenHomeNX/tools/test save/upstream'/name).read_bytes()
     clear=ds.decrypt(record)
     assert clear is not None
     return clear,encrypt(clear)
@@ -152,5 +152,21 @@ class HTTP(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as caught:self.request('/ohnx/nds/swap',body)
         self.assertEqual(caught.exception.code,409)
         with self.assertRaises(urllib.error.HTTPError):self.request('/ohnx/nds/box?path=../escape')
+
+    def test_batch_moves_are_atomic_and_idempotent(self):
+        sha=hashlib.sha256(self.original).hexdigest()
+        body={'path':'roms/nds/test.sav','sha256':sha,'moves':[[0,0,1,2],[1,2,2,3]]}
+        response=json.loads(self.request('/ohnx/nds/swap',body))
+        expected=ds.Save(ds.Save(self.original).swap(0,0,1,2)).swap(1,2,2,3)
+        self.assertEqual(self.path.read_bytes(),expected)
+        self.assertEqual(response['sha256'],hashlib.sha256(expected).hexdigest())
+        # A lost HTTP response can be retried without applying the draft twice.
+        retry=json.loads(self.request('/ohnx/nds/swap',body))
+        self.assertEqual(retry,response)
+        self.assertEqual(self.path.read_bytes(),expected)
+        invalid={'path':'roms/nds/test.sav','sha256':response['sha256'],
+                 'moves':[[2,3,3,4],[99,0,0,0]]}
+        with self.assertRaises(urllib.error.HTTPError):self.request('/ohnx/nds/swap',invalid)
+        self.assertEqual(self.path.read_bytes(),expected)
 
 if __name__=='__main__':unittest.main()

@@ -165,10 +165,9 @@ pub fn handle_menu_event_id(app_handle: &AppHandle, event_id: &str) {
             Ok(_) => info!("Save successful"),
             Err(error) => error!("Error saving: {error}"),
         },
-        "reset" => {
-            if let Err(err) = handle_reset(app_handle) {
-                error!("Error resetting: {err}");
-            }
+        "reset" => { let _ = app_handle.emit("reset", ()); }
+        "discard-edits" => {
+            if let Err(err) = handle_reset(app_handle) { error!("Error discarding edits: {err}"); }
         }
         "open-appdata" => match app_handle.controller().get_data_folder() {
             Err(err) => {
@@ -182,7 +181,7 @@ pub fn handle_menu_event_id(app_handle: &AppHandle, event_id: &str) {
             }
             Ok(dir) => command_open(dir.to_str().unwrap_or_default()),
         },
-        "exit" => std::process::exit(0),
+        "exit" => { if let Some(window) = app_handle.get_webview_window("main") { let _ = window.close(); } },
 
         // View menu actions
         "zoom_in" => app_handle
@@ -204,8 +203,6 @@ pub fn handle_menu_event_id(app_handle: &AppHandle, event_id: &str) {
 }
 
 fn handle_reset(app_handle: &AppHandle) -> Result<(), BoxedError> {
-    app_handle.emit("reset", ())?;
-
     let state = app_handle.state::<synced_state::AllSyncedState>();
     let mut synced_state = state
         .lock()

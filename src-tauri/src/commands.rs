@@ -251,10 +251,13 @@ pub fn load_banks(app_handle: tauri::AppHandle) -> CommandResult<StoredBankDataW
 #[specta::specta]
 pub fn write_banks(
     app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
     bank_data: StoredBankDataWasm,
 ) -> CommandResult<()> {
-    Ok(openhome_core::pkm_storage::write_banks(
-        &app_handle.controller(),
-        bank_data.into(),
-    )?)
+    let mut banks: openhome_core::pkm_storage::StoredBankData = bank_data.into();
+    banks.order_boxes_by_indices();
+    banks.reset_box_indices();
+    let path = app_handle.controller().absolute_path(DataDir::Storage, "banks.json")?;
+    let bytes = serde_json::to_vec(&banks)?;
+    Ok(state.lock()?.transaction_mut().write_file_bytes_temped(path, bytes)?)
 }

@@ -1,5 +1,7 @@
 import { liveHub, isRemoteSave } from '@openhome-core/lan/liveHub'
 import useBackend from '@openhome-core/backend/useBackend'
+import { getCurrentWindow } from '@tauri-apps/api/window'
+import { SAV } from '@openhome-core/save/interfaces'
 import { OhpkmIdentifier } from '@openhome-core/pkm/Lookup'
 import { OHPKM } from '@openhome-core/pkm/OHPKM'
 import { SAVClass } from '@openhome-core/save/util'
@@ -38,7 +40,10 @@ export default function SavesProvider({ children }: SavesProviderProps) {
   const [releaseWarningDisplayed, setReleaseWarningDisplayed] = useState(false)
   const [saving, setSavingState] = useState(false)
   const saveInFlight = useRef(false)
-  const autoFailed = useRef('')
+  const [closeRequest, setCloseRequest] = useState<{
+    kind: 'save' | 'window' | 'discard'
+    save?: SAV
+  }>()
   const setSaving = (value: boolean) => {
     saveInFlight.current = value
     setSavingState(value)
@@ -55,7 +60,7 @@ export default function SavesProvider({ children }: SavesProviderProps) {
   const [disambiguationSaveTypes, setDisambiguationSaveTypes] = useState<Option<SAVClass[]>>()
   const navigate = useNavigate()
   const ohpkmStore = useOhpkmStore()
-  const { reloadBankStore } = useBanksAndBoxes()
+  const { banks, getCurrentBank, bankModified, markBankSaved } = useBanksAndBoxes()
 
   const promptDisambiguation = useCallback(async (possibleSaveTypes: SAVClass[]) => {
     setDisambiguationSaveTypes(possibleSaveTypes)
@@ -70,11 +75,10 @@ export default function SavesProvider({ children }: SavesProviderProps) {
     .map((data) => data.save)
 
   const saveChanges = useCallback(
-    async (
-      releaseWarningAccepted: boolean,
-      automatic = false
-    ): Promise<Result<null, SaveError[]>> => {
-      if (saveInFlight.current) return R.Ok(null)
+    async (releaseWarningAccepted: boolean): Promise<Result<null, SaveError[]>> => {
+      if (saveInFlight.current) return R.Err([BackendSaveError('A save is already in progress')])
+      if (openSavesState.pendingMonLocations.length)
+        return R.Err([BackendSaveError('Wait for the current Pokémon move to finish')])
       try {
         await liveHub.preflight(allOpenSaves.map((save) => save.filePath.raw))
       } catch (error) {
@@ -84,7 +88,7 @@ export default function SavesProvider({ children }: SavesProviderProps) {
       const shouldReleasePokemon = openSavesState.monsToRelease.length > 0
       if (shouldReleasePokemon && !releaseWarningAccepted) {
         setReleaseWarningDisplayed(true)
-        return R.Ok(null)
+        return R.Err([BackendSaveError('Confirm Pokémon releases before saving')])
       }
 
       setSaving(true)
@@ -123,6 +127,16 @@ export default function SavesProvider({ children }: SavesProviderProps) {
 
       const saveWriters = allOpenSaves.map((save) => save.prepareWriter())
 
+      const bankResult = await backend.writeHomeBanks({
+        banks,
+        current_bank: getCurrentBank().index,
+      })
+      if (R.isErr(bankResult)) {
+        await backend.rollbackTransaction()
+        setSaving(false)
+        return R.Err([BackendSaveError(bankResult.error)])
+      }
+
       const promises = [
         backend.writeAllSaveFiles(saveWriters),
         backend.deleteHomeMons(
@@ -140,7 +154,6 @@ export default function SavesProvider({ children }: SavesProviderProps) {
           setSaving(false)
           return R.Err([SaveItemBagData(saveBagResult.error)])
         }
-        bagDispatch({ type: 'clear_modified' })
       }
 
       const results = (await Promise.all(promises)).flat()
@@ -148,7 +161,7 @@ export default function SavesProvider({ children }: SavesProviderProps) {
 
       if (errors.length) {
         displayError('Error Saving', errors)
-        backend.rollbackTransaction()
+        await backend.rollbackTransaction()
         setSaving(false)
         return R.Err(errors.map(BackendSaveError))
       }
@@ -156,6 +169,7 @@ export default function SavesProvider({ children }: SavesProviderProps) {
       const syncedStateResult = await backend.saveSyncedState()
       if (R.isErr(syncedStateResult)) {
         displayError('Error Saving', syncedStateResult.error)
+        await backend.rollbackTransaction()
         setSaving(false)
         return R.Err([BackendSaveError(syncedStateResult.error)])
       }
@@ -169,7 +183,10 @@ export default function SavesProvider({ children }: SavesProviderProps) {
       openSavesDispatch({ type: 'clear_updated_box_slots' })
       openSavesDispatch({ type: 'clear_mons_to_release' })
 
-      setChangesSavedDisplayed(!automatic)
+      liveHub.markWritesComplete()
+      markBankSaved()
+      bagDispatch({ type: 'clear_modified' })
+      setChangesSavedDisplayed(true)
 
       setSaving(false)
       return R.Ok(null)
@@ -184,33 +201,12 @@ export default function SavesProvider({ children }: SavesProviderProps) {
       ohpkmStore,
       defaultConvertStrategy,
       bagDispatch,
+      banks,
+      getCurrentBank,
+      markBankSaved,
+      openSavesState.pendingMonLocations.length,
     ]
   )
-
-  const autoSave = useEffectEvent(async () => {
-    const remote = allOpenSaves.filter(
-      (save) => isRemoteSave(save.filePath.raw) && save.updatedBoxSlots.length
-    )
-    if (
-      !remote.length ||
-      saveInFlight.current ||
-      openSavesState.pendingMonLocations.length ||
-      openSavesState.monsToRelease.length
-    )
-      return
-    if (remote.some((save) => liveHub.lockReason(save.filePath.raw))) return
-    const signature = JSON.stringify(
-      remote.map((save) => [save.filePath.raw, save.updatedBoxSlots])
-    )
-    if (signature === autoFailed.current) return
-    const result = await saveChanges(false, true)
-    if (R.isErr(result)) autoFailed.current = signature
-    else autoFailed.current = ''
-  })
-  useEffect(() => {
-    const timer = setInterval(() => void autoSave(), 2000)
-    return () => clearInterval(timer)
-  }, [])
 
   // load bag
   useEffect(() => {
@@ -228,29 +224,116 @@ export default function SavesProvider({ children }: SavesProviderProps) {
     }
   }, [backend, itemBagState.loaded, itemBagState.error, bagDispatch])
 
-  const clearOhpkmCache = useEffectEvent(ohpkmStore.clearCache)
+  const hasUnsavedChanges =
+    bankModified ||
+    itemBagState.modified ||
+    openSavesState.monsToRelease.length > 0 ||
+    openSavesState.pendingMonLocations.length > 0 ||
+    allOpenSaves.some((save) => save.updatedBoxSlots.length > 0)
 
-  useEffect(() => {
-    // returns a function to stop listening
-    const stopListening = backend.onMenuEvents({
-      save: () => saveChanges(false),
-      reset: () => {
-        if (saveInFlight.current) return
-        for (const save of allOpenSaves)
-          if (isRemoteSave(save.filePath.raw)) void liveHub.close(save.filePath.raw)
-        openSavesDispatch({ type: 'clear_mons_to_release' })
-        reloadBankStore()
-        clearOhpkmCache()
-        openSavesDispatch({ type: 'close_all_saves' })
-      },
-    })
-
-    // the "stop listening" function should be called when the effect returns,
-    // otherwise duplicate listeners will exist
-    return () => {
-      stopListening()
+  const [, refreshDirty] = useReducer((value: number) => value + 1, 0)
+  const dirtySignature = useRef('')
+  const checkDirty = useEffectEvent(() => {
+    const signature = JSON.stringify(allOpenSaves.map((save) => save.updatedBoxSlots))
+    if (signature !== dirtySignature.current) {
+      dirtySignature.current = signature
+      refreshDirty()
     }
-  }, [backend, saveChanges, openSavesDispatch, bagDispatch, reloadBankStore, allOpenSaves])
+  })
+  useEffect(() => {
+    const timer = setInterval(() => checkDirty(), 500)
+    return () => clearInterval(timer)
+  }, [])
+
+  async function releaseSaves() {
+    for (const save of allOpenSaves)
+      if (isRemoteSave(save.filePath.raw)) await liveHub.close(save.filePath.raw)
+  }
+  async function closeSave(save: SAV) {
+    if (isRemoteSave(save.filePath.raw)) await liveHub.close(save.filePath.raw)
+    openSavesDispatch({ type: 'remove_save', payload: save })
+  }
+  function requestCloseSave(save: SAV) {
+    if (saveInFlight.current) return
+    if (hasUnsavedChanges) setCloseRequest({ kind: 'save', save })
+    else void closeSave(save)
+  }
+  async function requestCloseWindow() {
+    if (saveInFlight.current) return
+    if (hasUnsavedChanges) setCloseRequest({ kind: 'window' })
+    else {
+      await releaseSaves()
+      await getCurrentWindow().destroy()
+    }
+  }
+  async function saveAllChanges(confirmed = false) {
+    try {
+      const result = await saveChanges(confirmed)
+      if (R.isErr(result) && (confirmed || !openSavesState.monsToRelease.length))
+        displayError(
+          'Changes were not fully saved',
+          result.error.map((error) => JSON.stringify(error))
+        )
+      return R.isOk(result)
+    } catch (error) {
+      await backend.rollbackTransaction()
+      setSaving(false)
+      displayError('Changes were not fully saved', String(error))
+      return false
+    }
+  }
+  async function finishClose(save: boolean) {
+    const request = closeRequest
+    if (!request || saveInFlight.current || openSavesState.pendingMonLocations.length) return
+    if (save) {
+      if (!(await saveAllChanges(true))) return
+      setCloseRequest(undefined)
+      if (request.kind === 'window') {
+        await releaseSaves()
+        await getCurrentWindow().destroy()
+      } else if (request.save) await closeSave(request.save)
+    } else {
+      if (liveHub.hasUnresolvedWrite()) {
+        displayError(
+          'Delivery still pending',
+          'Changes may already be on the hub. Complete Save before closing or discarding.'
+        )
+        return
+      }
+      // Discard the entire editing session, including transfers into the bank.
+      await backend.emitMenuEvent('discard-edits')
+      await releaseSaves()
+      setCloseRequest(undefined)
+      if (request.kind === 'window') await getCurrentWindow().destroy()
+      else window.location.reload()
+    }
+  }
+  const closeWindowEvent = useEffectEvent(requestCloseWindow)
+  const saveEvent = useEffectEvent(async () => {
+    await saveAllChanges()
+  })
+  const discardEvent = useEffectEvent(() => {
+    if (!saveInFlight.current) setCloseRequest({ kind: 'discard' })
+  })
+  useEffect(() => {
+    const stop = backend.onMenuEvents({ save: () => void saveEvent(), reset: () => discardEvent() })
+    let disposed = false
+    let unlisten: (() => void) | undefined
+    void getCurrentWindow()
+      .onCloseRequested((event) => {
+        event.preventDefault()
+        void closeWindowEvent()
+      })
+      .then((stop) => {
+        if (disposed) stop()
+        else unlisten = stop
+      })
+    return () => {
+      disposed = true
+      stop()
+      unlisten?.()
+    }
+  }, [backend])
 
   if (openSavesState.error) {
     return (
@@ -268,7 +351,7 @@ export default function SavesProvider({ children }: SavesProviderProps) {
   }
 
   async function saveChangesReleaseConfirmed() {
-    await saveChanges(true)
+    await saveAllChanges(true)
     hideReleaseWarning()
   }
 
@@ -287,11 +370,31 @@ export default function SavesProvider({ children }: SavesProviderProps) {
             .sort((a, b) => a.index - b.index)
             .map((data) => data.save),
           promptDisambiguation,
+          requestCloseSave,
+          saveAllChanges: async () => {
+            await saveAllChanges()
+          },
+          requestDiscard: () => setCloseRequest({ kind: 'discard' }),
+          hasUnsavedChanges,
+          saving,
         }}
       >
         <div />
-        {children}
+        <div inert={saving} style={{ height: '100%' }}>
+          {children}
+        </div>
       </SavesContext>
+      <PromptDialog
+        title="Unsaved changes"
+        open={!!closeRequest}
+        onClose={() => setCloseRequest(undefined)}
+        description="Save all pending changes to the bank and game saves? Saving a LAN save also sends it to the NDS. Discard undoes this session and closes all open saves. Pokémon marked for release will be permanently deleted if you save."
+        actions={[
+          { uniqueLabel: 'Cancel', action: () => setCloseRequest(undefined), type: 'cancel' },
+          { uniqueLabel: 'Discard changes', action: () => finishClose(false), type: 'destructive' },
+          { uniqueLabel: 'Save all changes', action: () => finishClose(true) },
+        ]}
+      />
       <SaveDisambiguationDialog
         open={Boolean(disambiguationSaveTypes)}
         saveTypes={disambiguationSaveTypes}

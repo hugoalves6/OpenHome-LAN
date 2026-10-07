@@ -33,6 +33,7 @@ export type LocationsByIdentifier = Record<OhpkmIdentifier, BankBoxCoordinates>
 
 type BanksAndBoxesState = {
   banks: SimpleOpenHomeBank[]
+  savedBanks: SimpleOpenHomeBank[]
   currentBankIndex: number
   currentBoxIndex: number
   updatedBoxSlots: BankBoxCoordinates[]
@@ -42,6 +43,7 @@ type BanksAndBoxesState = {
 function banksAndBoxesStateFromStored(stored: StoredBankData): BanksAndBoxesState {
   return {
     banks: stored.banks,
+    savedBanks: stored.banks,
     currentBankIndex: stored.current_bank,
     currentBoxIndex: stored.banks.at(stored.current_bank)?.current_box ?? 0,
     updatedBoxSlots: [],
@@ -50,6 +52,7 @@ function banksAndBoxesStateFromStored(stored: StoredBankData): BanksAndBoxesStat
 }
 
 export type BanksAndBoxesController = BanksAndBoxesState & {
+  markSaved: () => void
   reloadStore: () => Promise<void>
 
   getCurrentBank: () => SimpleOpenHomeBank
@@ -122,6 +125,10 @@ export const createBanksAndBoxesStore = (
       }
 
       return {
+        markSaved: () =>
+          set((state) => {
+            state.savedBanks = state.banks
+          }),
         reloadStore: async () => {
           $R(await loadStored()).match(
             (banks) => set(banksAndBoxesStateFromStored(banks)),
@@ -131,6 +138,7 @@ export const createBanksAndBoxesStore = (
           )
         },
         banks: stored.banks,
+        savedBanks: stored.banks,
         currentBankIndex: stored.current_bank,
         currentBoxIndex: stored.banks[stored.current_bank].current_box,
         updatedBoxSlots: [],
@@ -510,6 +518,8 @@ export function useBanksAndBoxes() {
   const reloadBankStore = withSelectors.use.reloadStore()
 
   const banks = withSelectors.use.banks()
+  const savedBanks = withSelectors.use.savedBanks()
+  const markBankSaved = withSelectors.use.markSaved()
   const addBank = withSelectors.use.addBank()
   const getCurrentBank = withSelectors.use.getCurrentBank()
   const getBankName = withSelectors.use.getBankName()
@@ -652,6 +662,8 @@ export function useBanksAndBoxes() {
 
   return {
     saveChanges,
+    bankModified: banks !== savedBanks,
+    markBankSaved,
     reloadBankStore,
 
     banks,

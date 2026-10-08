@@ -1,0 +1,28 @@
+name: Build Windows app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [lan-live-dsi]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: corepack enable; pnpm install --frozen-lockfile
+      - name: Type check
+        run: pnpm typecheck
+      - name: Build installer
+        run: pnpm tauri build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenHome-LAN-1.18.3-windows-x64
+          path: target/release/bundle/nsis/OpenHome LAN_1.18.3_x64-setup.exe
+          if-no-files-found: error

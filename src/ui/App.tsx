@@ -3,6 +3,7 @@ import BackendInterface from '@openhome-core/backend/backendInterface'
 import useBackend from '@openhome-core/backend/useBackend'
 import { TauriBackend } from '@openhome-core/tauri/backend'
 import { R } from '@openhome-core/util/functional'
+import { invoke } from '@tauri-apps/api/core'
 import '@openhome-ui/App.css'
 import AppTabs from '@openhome-ui/AppTabs'
 import useIsDarkMode from '@openhome-ui/hooks/darkMode'
@@ -82,6 +83,16 @@ function AppWithBackend() {
   const reloadSettings = useEffectEvent(backend.getSettings)
   const getPlatform = useEffectEvent(backend.getPlatform)
   const displayErrorEvent = useEffectEvent(displayError)
+
+  useEffect(() => {
+    void invoke<{ available: boolean; version?: string }>('check_lan_update')
+      .then((update) => {
+        if (update.available && window.confirm(`OpenHome LAN ${update.version} is ready. Download and install it now?`)) {
+          return invoke('install_lan_update')
+        }
+      })
+      .catch(() => undefined)
+  }, [])
 
   // only on app start
   useEffect(() => {

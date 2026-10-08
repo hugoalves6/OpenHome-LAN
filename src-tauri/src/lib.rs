@@ -1,4 +1,5 @@
 mod commands;
+mod auto_update;
 mod data_controller;
 mod deprecated;
 mod logging;
@@ -23,6 +24,8 @@ use std::env;
 use tauri::Manager;
 
 const RAW_HANDLER: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+    auto_update::check_lan_update,
+    auto_update::install_lan_update,
     lan_hub::lan_hub_request,
     commands::get_file_bytes,
     commands::get_storage_file_json,
